@@ -4,10 +4,10 @@
   "description": "Production-grade Electron P2P Media SDK and Application",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.ts --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
+    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.tsx --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js --jsx=automatic && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
     "dev": "cross-env NODE_ENV=development tsc --watch",
     "typecheck": "tsc --noEmit",
-    "start": "cross-env NODE_ENV=development electron .",
+    "start": "npm run build && cross-env NODE_ENV=development electron .",
     "test": "tsx test/index.ts",
     "package:portable": "npm run build && npx -y electron-packager . P2PScreenShare --platform=win32 --arch=x64 --out=release --overwrite && node -e \"const fs = require('fs'); const { execSync } = require('child_process'); if (fs.existsSync('release/P2PScreenShare-Portable.zip')) fs.unlinkSync('release/P2PScreenShare-Portable.zip'); console.log('Zipping portable application package...'); execSync('powershell Compress-Archive -Path ./release/P2PScreenShare-win32-x64/* -DestinationPath ./release/P2PScreenShare-Portable.zip -Force', {stdio: 'inherit'}); console.log('✅ Created release/P2PScreenShare-Portable.zip');\"",
     "clean": "rimraf dist release"
@@ -22,8 +22,15 @@
   ],
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.14"
+  },
   "devDependencies": {
     "@types/node": "^20.12.7",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "electron": "^30.0.0",

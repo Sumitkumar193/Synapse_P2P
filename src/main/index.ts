@@ -90,10 +90,10 @@ function createWindow(): BrowserWindow {
   const iconPath = path.join(__dirname, '../../assets/icon.jpg');
 
   const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 1000,
-    minHeight: 700,
+    width: 980,
+    height: 640,
+    minWidth: 880,
+    minHeight: 560,
     title: 'P2P Screen Share',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     frame: false,

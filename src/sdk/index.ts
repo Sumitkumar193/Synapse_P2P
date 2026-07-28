@@ -22,10 +22,13 @@ export class P2PMediaSDK {
   private logger: Logger;
   private peerId: string;
   private currentRoomId?: string;
+  private sessionTimer?: any;
 
   constructor(config: SDKConfig = {}) {
     this.config = {
       autoConnect: true,
+      iceTransportPolicy: 'all',
+      sessionTimeoutMs: 120000, // 2-minute unestablished session expiration window
       iceServers: [
         // Cloudflare STUN Server (Ultra-fast Global Anycast IP Discovery)
         { urls: 'stun:stun.cloudflare.com:3478' },
@@ -68,6 +71,13 @@ export class P2PMediaSDK {
     } else {
       this.signalingProvider = new WebTorrentSignalingProvider();
     }
+
+    // Cancel session timer when peer connects
+    this.events.on('connection-state-change', (state) => {
+      if (state === 'connected') {
+        this.cancelSessionTimer();
+      }
+    });
   }
 
   public async getDesktopSources(types: ('screen' | 'window')[] = ['screen', 'window']): Promise<DesktopSource[]> {
@@ -82,27 +92,62 @@ export class P2PMediaSDK {
     return stream;
   }
 
-  public async connect(roomId: string): Promise<void> {
-    this.currentRoomId = roomId;
-    this.logger.info(`Connecting to room ${roomId} with peerId ${this.peerId}...`);
+  public async connect(roomId: string, isHost: boolean = false): Promise<void> {
+    const cleanRoomId = roomId.replace(/-/g, '').toLowerCase();
 
-    await this.signalingProvider.connect(roomId);
-    await this.signalingProvider.joinRoom(roomId, this.peerId);
+    // Close any previous transport instance cleanly before starting a new connection
+    if (this.transport) {
+      this.transport.close();
+      this.transport = undefined;
+    }
+
+    // Generate fresh peerId for each session connection
+    this.peerId = this.generatePeerId();
+    this.currentRoomId = cleanRoomId;
+    this.logger.info(`Connecting to room ${cleanRoomId} with peerId ${this.peerId}...`);
+
+    await this.signalingProvider.connect(cleanRoomId);
+    await this.signalingProvider.joinRoom(cleanRoomId, this.peerId);
 
     this.transport = new WebRTCTransport({
       peerId: this.peerId,
-      roomId: roomId,
+      roomId: cleanRoomId,
       iceServers: this.config.iceServers,
+      iceTransportPolicy: this.config.iceTransportPolicy,
+      preferredVideoCodec: this.config.preferredVideoCodec,
       signalingProvider: this.signalingProvider,
       eventEmitter: this.events,
     });
 
     await this.transport.initialize();
 
+    // If host is waiting for a viewer, start the 2-minute unestablished session timeout
+    if (isHost) {
+      this.startSessionTimer();
+    }
+
     // Attach active stream if already captured
     const activeStream = this.mediaManager.getActiveStream();
     if (activeStream) {
       this.transport.addStream(activeStream);
+    }
+  }
+
+  public startSessionTimer(): void {
+    this.cancelSessionTimer();
+    const timeout = this.config.sessionTimeoutMs || 120000;
+    this.logger.info(`Starting ${timeout / 1000}s session expiration timer...`);
+    this.sessionTimer = setTimeout(() => {
+      this.logger.info(`Session code window expired after ${timeout / 1000}s. Emitting session-expired for auto-rotation...`);
+      this.events.emit('session-expired');
+    }, timeout);
+  }
+
+  public cancelSessionTimer(): void {
+    if (this.sessionTimer) {
+      clearTimeout(this.sessionTimer);
+      this.sessionTimer = undefined;
+      this.logger.info('Session expiration timer cancelled');
     }
   }
 
@@ -122,7 +167,21 @@ export class P2PMediaSDK {
   }
 
   public async disconnect(): Promise<void> {
+    this.cancelSessionTimer();
     this.mediaManager.stopLocalStream();
+
+    if (this.currentRoomId && this.signalingProvider.isConnected()) {
+      try {
+        await this.signalingProvider.send({
+          type: 'peer-left',
+          senderId: this.peerId,
+          roomId: this.currentRoomId,
+        });
+      } catch (e) {
+        // Ignore signaling errors during disconnect teardown
+      }
+    }
+
     if (this.transport) {
       this.transport.close();
       this.transport = undefined;
@@ -135,8 +194,14 @@ export class P2PMediaSDK {
   }
 
   public generateSessionCode(): string {
-    const part1 = Math.floor(100 + Math.random() * 900);
-    const part2 = Math.floor(100 + Math.random() * 900);
+    let rawStr: string;
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      rawStr = crypto.randomUUID().replace(/-/g, '');
+    } else {
+      rawStr = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+    }
+    const part1 = rawStr.substring(0, 4).toLowerCase();
+    const part2 = rawStr.substring(4, 8).toLowerCase();
     return `${part1}-${part2}`;
   }
 
