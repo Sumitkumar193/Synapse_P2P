@@ -1,0 +1,32 @@
+{
+  "name": "electron-p2p-media-sdk",
+  "version": "1.0.0",
+  "description": "Production-grade Electron P2P Media SDK and Application",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.ts --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
+    "dev": "cross-env NODE_ENV=development tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "start": "cross-env NODE_ENV=development electron .",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "electron",
+    "webrtc",
+    "p2p",
+    "screen-share",
+    "media-sdk",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
+    "electron": "^30.0.0",
+    "rimraf": "^5.0.5",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}

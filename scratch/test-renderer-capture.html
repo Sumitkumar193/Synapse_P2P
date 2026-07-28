@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Renderer Capture Test</h1>
+<div id="output">Testing...</div>
+<script>
+async function test() {
+  const output = document.getElementById('output');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: 'screen:0:0'
+        }
+      }
+    });
+
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.play();
+
+    video.onloadedmetadata = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 300;
+      canvas.height = 180;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 300, 180);
+      const dataUrl = canvas.toDataURL('image/png');
+      output.innerHTML = `SUCCESS! Stream captured. Thumbnail length: ${dataUrl.length}`;
+      stream.getTracks().forEach(t => t.stop());
+    };
+  } catch (err) {
+    output.innerHTML = `ERROR: ${err.message}`;
+  }
+}
+test();
+</script>
+</body>
+</html>

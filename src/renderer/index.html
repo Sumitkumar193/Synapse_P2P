@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Screen Share</title>
+  <style>
+    :root {
+      --bg-gradient: radial-gradient(circle at top left, #1e1b4b 0%, #0f172a 60%, #090d16 100%);
+      --glass-bg: rgba(30, 41, 59, 0.7);
+      --glass-border: rgba(255, 255, 255, 0.1);
+      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      --accent-hover: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      --success-color: #10b981;
+      --danger-color: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --card-bg: rgba(15, 23, 42, 0.7);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      user-select: none;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+    }
+
+    /* Custom Integrated Header / Titlebar */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--glass-border);
+      -webkit-app-region: drag;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: var(--accent-gradient);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 0.95rem;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    }
+
+    .brand-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      background: linear-gradient(90deg, #818cf8, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      -webkit-app-region: no-drag;
+    }
+
+    .btn-new-win {
+      background: rgba(99, 102, 241, 0.15);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-new-win:hover {
+      background: rgba(99, 102, 241, 0.3);
+      color: white;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.12);
+      color: var(--success-color);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--success-color);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--success-color);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.6; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.15); }
+      100% { opacity: 0.6; transform: scale(0.9); }
+    }
+
+    /* Window Control Buttons inside App Header */
+    .window-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+
+    .win-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.15s ease;
+    }
+
+    .win-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+    }
+
+    .win-btn-close:hover {
+      background: #ef4444 !important;
+      color: white !important;
+    }
+
+    /* App Workspace */
+    .app-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .landing-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 1100px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .card-icon {
+      width: 44px;
+      height: 44px;
+      background: rgba(99, 102, 241, 0.18);
+      color: #818cf8;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .card-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .card-subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Input & Interactive Elements */
+    .sources-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .btn-refresh {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      border: 1px solid var(--glass-border);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-refresh:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+    }
+
+    .sources-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: 10px;
+      max-height: 180px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .source-card {
+      background: var(--card-bg);
+      border: 2px solid transparent;
+      border-radius: 10px;
+      padding: 10px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+
+    .source-card:hover {
+      background: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+
+    .source-card.selected {
+      border-color: #818cf8;
+      background: rgba(99, 102, 241, 0.25);
+      box-shadow: 0 0 14px rgba(99, 102, 241, 0.35);
+    }
+
+    .source-card img {
+      width: 100%;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 6px;
+    }
+
+    .source-badge {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      background: rgba(15, 23, 42, 0.85);
+      color: #a78bfa;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .source-card span {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      width: 100%;
+    }
+
+    .info-note {
+      font-size: 0.76rem;
+      color: var(--text-muted);
+      background: rgba(15, 23, 42, 0.4);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--glass-border);
+      line-height: 1.3;
+    }
+
+    .toggle-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--glass-border);
+    }
+
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    .toggle-label input[type="checkbox"] {
+      accent-color: #6366f1;
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+    }
+
+    .btn {
+      background: var(--accent-gradient);
+      color: white;
+      border: none;
+      padding: 13px 18px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+    }
+
+    .btn:hover {
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 22px rgba(99, 102, 241, 0.5);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--glass-border);
+      box-shadow: none;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .btn-danger {
+      background: var(--danger-color);
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    .code-box {
+      background: rgba(15, 23, 42, 0.9);
+      border: 2px dashed rgba(99, 102, 241, 0.4);
+      border-radius: 14px;
+      padding: 16px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .code-val {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: 5px;
+      color: #a78bfa;
+      font-family: 'Courier New', monospace;
+      text-shadow: 0 0 16px rgba(167, 139, 250, 0.4);
+    }
+
+    .code-input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.9);
+      border: 2px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: 5px;
+      color: #f8fafc;
+      text-align: center;
+      outline: none;
+      transition: all 0.2s ease;
+      font-family: 'Courier New', monospace;
+      user-select: text;
+    }
+
+    .code-input:focus {
+      border-color: #818cf8;
+      box-shadow: 0 0 16px rgba(129, 140, 248, 0.3);
+    }
+
+    /* Active Session Fullscreen Stream View */
+    .session-view {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      background: black;
+      border-radius: 16px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid var(--glass-border);
+    }
+
+    .video-viewport {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      max-height: 75vh;
+      object-fit: contain;
+    }
+
+    .control-bar {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      padding: 10px 24px;
+      border-radius: 40px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+    }
+  </style>
+</head>
+<body>
+  <!-- Frameless Custom Title Bar -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">P2P</div>
+      <span class="brand-title">Screen Share</span>
+    </div>
+
+    <div class="header-right">
+      <button class="btn-new-win" id="btn-open-2nd-win" title="Launch a second window to test Host & Viewer on same computer">
+        ➕ Open 2nd Window (Test Viewer)
+      </button>
+
+      <div class="status-badge" id="app-status">
+        <div class="status-dot"></div>
+        <span id="status-text">Ready</span>
+      </div>
+
+      <!-- Integrated App Window Controls -->
+      <div class="window-controls">
+        <button class="win-btn" id="win-min" title="Minimize">&#8722;</button>
+        <button class="win-btn" id="win-max" title="Maximize">&#9633;</button>
+        <button class="win-btn win-btn-close" id="win-close" title="Close">&#10005;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- App Workspace -->
+  <div class="app-body">
+    <!-- Landing Views -->
+    <div class="landing-grid" id="landing-view">
+      <!-- Host Screen Share Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📺</div>
+          <div>
+            <div class="card-title">Share This Screen</div>
+            <div class="card-subtitle">Select screen or window to share with remote user</div>
+          </div>
+        </div>
+
+        <div class="sources-header">
+          <div style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted);">Select Display Source:</div>
+          <button class="btn-refresh" id="btn-refresh-sources" title="Rescan displays">🔄 Rescan</button>
+        </div>
+
+        <div class="sources-grid" id="sources-grid">
+          <!-- Always populated with Entire Screen card -->
+        </div>
+
+        <div class="info-note">
+          💡 <strong>Tip:</strong> Sharing Entire Screen shares your complete desktop, active applications, and window views in real time.
+        </div>
+
+        <div class="toggle-group">
+          <label class="toggle-label">
+            <input type="checkbox" id="chk-sys-audio" checked>
+            🔊 Speaker Sound (System Audio)
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" id="chk-mic-audio" checked>
+            🎙️ Microphone Audio
+          </label>
+        </div>
+
+        <button class="btn" id="btn-start-host">
+          🚀 Start Sharing & Create Code
+        </button>
+
+        <div class="code-box" id="host-code-box" style="display: none;">
+          <div style="font-size: 0.78rem; color: var(--text-muted); font-weight: 600;">YOUR SESSION CODE</div>
+          <div class="code-val" id="host-code-val">--- ---</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);" id="host-wait-msg">Waiting for remote viewer to join...</div>
+          <button class="btn btn-secondary" id="btn-copy-code" style="margin-top: 6px; font-size: 0.8rem; padding: 6px 14px;">📋 Copy Code</button>
+        </div>
+      </div>
+
+      <!-- Join Screen Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">🔗</div>
+          <div>
+            <div class="card-title">Join Remote Screen</div>
+            <div class="card-subtitle">Enter 6-digit code to view screen & hear live audio</div>
+          </div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-align: center;">Remote Session Code:</div>
+          <input type="text" class="code-input" id="join-code-input" placeholder="123-456" maxlength="7" autocomplete="off">
+          <button class="btn" id="btn-join-session">
+            🔗 Connect & View Screen
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Session View -->
+    <div class="session-view" id="session-view">
+      <div class="video-viewport">
+        <!-- Remote Stream Player (Video + Mixed Audio) -->
+        <video id="remote-video" autoplay playsinline></video>
+        <!-- Local Preview Thumbnail -->
+        <video id="local-preview-video" autoplay playsinline muted style="position: absolute; top: 16px; right: 16px; width: 220px; height: 130px; border-radius: 10px; border: 2px solid var(--glass-border); display: none; object-fit: cover; box-shadow: 0 8px 24px rgba(0,0,0,0.5);"></video>
+      </div>
+
+      <div class="control-bar">
+        <button class="btn btn-secondary" id="btn-toggle-audio">🔊 Mute Audio</button>
+        <button class="btn btn-secondary" id="btn-fullscreen">⛶ Fullscreen</button>
+        <button class="btn btn-danger" id="btn-end-session">🔴 End Session</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="index.js"></script>
+</body>
+</html>
