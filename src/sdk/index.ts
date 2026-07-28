@@ -1,88 +1,72 @@
 import { SDKConfig, DesktopSource, ScreenCaptureOptions } from './types';
 import { TypedEventEmitter } from './events/EventEmitter';
 import { SDKEventMap } from './events/events';
-import { ISignalingProvider, MemorySignalingProvider, IPCSignalingProvider } from './signaling';
 import { MediaManager } from './media/MediaManager';
 import { WebRTCTransport } from './transport/WebRTCTransport';
+import { ISignalingProvider, IPCSignalingProvider, WebTorrentSignalingProvider } from './signaling';
 import { Logger } from './utils/Logger';
 
 export * from './types';
-export * from './events/EventEmitter';
 export * from './events/events';
-export * from './signaling';
-export * from './media/MediaManager';
-export * from './transport/WebRTCTransport';
-export * from './utils/Logger';
 export * from './utils/Errors';
+export { MediaManager } from './media/MediaManager';
+export { WebRTCTransport } from './transport/WebRTCTransport';
+export * from './signaling';
 
 export class P2PMediaSDK {
-  public events: TypedEventEmitter<SDKEventMap> = new TypedEventEmitter();
-  public mediaManager: MediaManager = new MediaManager();
-  public signaling: ISignalingProvider;
-  public transport?: WebRTCTransport;
-  
+  public readonly events: TypedEventEmitter<SDKEventMap>;
+  private mediaManager: MediaManager;
+  private transport?: WebRTCTransport;
+  private signalingProvider: ISignalingProvider;
   private config: SDKConfig;
   private logger: Logger;
   private peerId: string;
-  private roomId?: string;
+  private currentRoomId?: string;
 
   constructor(config: SDKConfig = {}) {
-    this.config = config;
-    this.peerId = config.peerId || `peer-${Math.random().toString(36).substring(2, 9)}`;
-    this.logger = new Logger(`P2PMediaSDK[${this.peerId}]`);
-    
-    // Default to IPCSignalingProvider in Electron environments, else MemorySignalingProvider
+    this.config = {
+      autoConnect: true,
+      iceServers: [
+        // Public STUN Servers (IP Discovery)
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+
+        // Free OpenRelay TURN Fallback Servers (UDP & TCP for Firewalls)
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelay',
+          credential: 'openrelay',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelay',
+          credential: 'openrelay',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelay',
+          credential: 'openrelay',
+        },
+      ],
+      ...config,
+    };
+
+    this.events = new TypedEventEmitter<SDKEventMap>();
+    this.mediaManager = new MediaManager();
+    this.logger = new Logger('P2PMediaSDK');
+    this.peerId = this.generatePeerId();
+
+    // Default to Electron IPC signaling provider if in Electron environment, else WebTorrent
     if (typeof window !== 'undefined' && window.electronAPI?.signaling) {
-      this.signaling = new IPCSignalingProvider();
+      this.signalingProvider = new IPCSignalingProvider();
     } else {
-      this.signaling = new MemorySignalingProvider();
+      this.signalingProvider = new WebTorrentSignalingProvider();
     }
-
-    this.setupSignalingAutoConnect();
-  }
-
-  private setupSignalingAutoConnect(): void {
-    this.signaling.onMessage(async (msg) => {
-      if (msg.type === 'peer-joined' && msg.senderId !== this.peerId) {
-        this.events.emit('peer-joined', msg.senderId);
-        const activeStream = this.mediaManager.getActiveStream();
-        if (activeStream && this.transport) {
-          this.logger.info(`Auto-initiating WebRTC connection to peer ${msg.senderId}`);
-          this.transport.addStream(activeStream);
-          await this.connectToPeer(msg.senderId);
-        }
-      } else if (msg.type === 'peer-left') {
-        this.events.emit('peer-left', msg.senderId);
-      }
-    });
-  }
-
-  public setSignalingProvider(provider: ISignalingProvider): void {
-    this.signaling = provider;
-    this.setupSignalingAutoConnect();
-  }
-
-  public async connect(roomId: string, signalingUrl?: string): Promise<void> {
-    this.roomId = roomId;
-    this.logger.info(`Connecting to room ${roomId}...`);
-
-    if (!this.signaling.isConnected()) {
-      await this.signaling.connect(signalingUrl);
-    }
-
-    this.transport = new WebRTCTransport({
-      peerId: this.peerId,
-      roomId: this.roomId,
-      iceServers: this.config.iceServers,
-      signalingProvider: this.signaling,
-      eventEmitter: this.events,
-    });
-
-    await this.signaling.joinRoom(roomId, this.peerId);
   }
 
   public async getDesktopSources(types: ('screen' | 'window')[] = ['screen', 'window']): Promise<DesktopSource[]> {
-    return await this.mediaManager.getDesktopSources(types);
+    return this.mediaManager.getDesktopSources(types);
   }
 
   public async startScreenShare(options: ScreenCaptureOptions): Promise<MediaStream> {
@@ -93,39 +77,65 @@ export class P2PMediaSDK {
     return stream;
   }
 
-  public async connectToPeer(targetPeerId: string): Promise<void> {
-    if (!this.transport) {
-      throw new Error('SDK is not connected to a room. Call connect() first.');
+  public async connect(roomId: string): Promise<void> {
+    this.currentRoomId = roomId;
+    this.logger.info(`Connecting to room ${roomId} with peerId ${this.peerId}...`);
+
+    await this.signalingProvider.connect(roomId);
+    await this.signalingProvider.joinRoom(roomId, this.peerId);
+
+    this.transport = new WebRTCTransport({
+      peerId: this.peerId,
+      roomId: roomId,
+      iceServers: this.config.iceServers,
+      signalingProvider: this.signalingProvider,
+      eventEmitter: this.events,
+    });
+
+    await this.transport.initialize();
+
+    // Attach active stream if already captured
+    const activeStream = this.mediaManager.getActiveStream();
+    if (activeStream) {
+      this.transport.addStream(activeStream);
     }
-    await this.transport.createOffer(targetPeerId);
   }
 
-  public sendData(data: string | ArrayBuffer): void {
-    if (!this.transport) {
-      throw new Error('Transport not initialized');
+  public getActiveTrackerUrl(): string {
+    if (this.signalingProvider && (this.signalingProvider as any).getActiveTrackerUrl) {
+      return (this.signalingProvider as any).getActiveTrackerUrl();
     }
-    this.transport.sendData(data);
+    return 'Electron IPC Bus';
+  }
+
+  public async getConnectionStats() {
+    const stats = this.transport ? await this.transport.getConnectionStats() : null;
+    return {
+      ...stats,
+      activeTrackerUrl: this.getActiveTrackerUrl(),
+    };
   }
 
   public async disconnect(): Promise<void> {
+    this.mediaManager.stopLocalStream();
     if (this.transport) {
       this.transport.close();
       this.transport = undefined;
     }
-    if (this.roomId) {
-      await this.signaling.leaveRoom(this.roomId, this.peerId);
+    if (this.currentRoomId) {
+      await this.signalingProvider.disconnect();
+      this.currentRoomId = undefined;
     }
-    await this.signaling.disconnect();
-    this.mediaManager.stopLocalStream();
-    this.logger.info('Disconnected SDK');
-  }
-
-  public getPeerId(): string {
-    return this.peerId;
+    this.logger.info('Disconnected session');
   }
 
   public generateSessionCode(): string {
-    const num = Math.floor(100000 + Math.random() * 900000);
-    return `${num.toString().substring(0, 3)}-${num.toString().substring(3, 6)}`;
+    const part1 = Math.floor(100 + Math.random() * 900);
+    const part2 = Math.floor(100 + Math.random() * 900);
+    return `${part1}-${part2}`;
+  }
+
+  private generatePeerId(): string {
+    return `peer_${Math.random().toString(36).substring(2, 9)}`;
   }
 }

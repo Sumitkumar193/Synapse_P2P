@@ -5,6 +5,9 @@ import * as dotenv from 'dotenv';
 // Load environment variables from .env
 dotenv.config();
 
+// Set log level for Chromium switches
+app.commandLine.appendSwitch('log-level', '3');
+
 import { setupDesktopCapturerIPC } from './ipc/desktopCapturerHandler';
 import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
@@ -32,6 +35,20 @@ function createWindow(): BrowserWindow {
   });
 
   windows.add(win);
+
+  // Forward Renderer console logs to terminal stdout during development
+  win.webContents.on('console-message', (_event, _level, message) => {
+    if (
+      message.includes('P2PMediaSDK') ||
+      message.includes('WebRTC') ||
+      message.includes('CONNECTION') ||
+      message.includes('Signaling') ||
+      message.includes('Candidate') ||
+      message.includes('STUN')
+    ) {
+      console.log(`[Terminal Dev Log] ${message}`);
+    }
+  });
 
   const rendererPath = path.join(__dirname, '../renderer/index.html');
   win.loadFile(rendererPath).catch((err) => {

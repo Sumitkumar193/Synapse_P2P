@@ -550,7 +550,10 @@
           <div style="font-size: 0.78rem; color: var(--text-muted); font-weight: 600;">YOUR SESSION CODE</div>
           <div class="code-val" id="host-code-val">--- ---</div>
           <div style="font-size: 0.8rem; color: var(--text-muted);" id="host-wait-msg">Waiting for remote viewer to join...</div>
-          <button class="btn btn-secondary" id="btn-copy-code" style="margin-top: 6px; font-size: 0.8rem; padding: 6px 14px;">📋 Copy Code</button>
+          <div style="display: flex; gap: 10px; margin-top: 8px;">
+            <button class="btn btn-secondary" id="btn-copy-code" style="font-size: 0.8rem; padding: 6px 14px;">📋 Copy Code</button>
+            <button class="btn btn-danger" id="btn-stop-host" style="font-size: 0.8rem; padding: 6px 14px;">🛑 Stop Sharing</button>
+          </div>
         </div>
       </div>
 

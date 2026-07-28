@@ -9,7 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const winClose = document.getElementById('win-close');
   const btnOpen2ndWin = document.getElementById('btn-open-2nd-win');
 
-  // Always enable "Open 2nd Window" button for easy local P2P testing
   if (btnOpen2ndWin) {
     btnOpen2ndWin.style.display = 'inline-block';
     btnOpen2ndWin.addEventListener('click', () => {
@@ -46,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const hostCodeVal = document.getElementById('host-code-val') as HTMLElement;
   const hostWaitMsg = document.getElementById('host-wait-msg') as HTMLElement;
   const btnCopyCode = document.getElementById('btn-copy-code') as HTMLButtonElement;
+  const btnStopHost = document.getElementById('btn-stop-host') as HTMLButtonElement;
 
   // Viewer Elements
   const joinCodeInput = document.getElementById('join-code-input') as HTMLInputElement;
@@ -140,6 +140,8 @@ document.addEventListener('DOMContentLoaded', () => {
       btnStartHost.disabled = true;
       btnStartHost.textContent = 'Initializing Stream...';
 
+      console.log(`[P2PMediaSDK] 🚀 Host creating session code ${sessionCode} (Room: ${cleanRoomId})...`);
+
       // Connect to signaling room with session code
       await sdk.connect(cleanRoomId);
 
@@ -150,7 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
         includeMicrophone: chkMicAudio.checked,
       });
 
-      // Show local preview thumbnail
+      // Local preview thumbnail MUST BE MUTED to prevent local echo
+      localPreviewVideo.muted = true;
       localPreviewVideo.srcObject = stream;
       localPreviewVideo.style.display = 'block';
 
@@ -165,6 +168,23 @@ document.addEventListener('DOMContentLoaded', () => {
       btnStartHost.textContent = '🚀 Start Sharing & Create Code';
       alert(`Failed to start sharing: ${err.message}`);
     }
+  });
+
+  // Host Action: Stop Sharing
+  btnStopHost?.addEventListener('click', async () => {
+    console.log('[P2PMediaSDK] 🛑 Host stopped sharing.');
+    await sdk.disconnect();
+
+    currentSessionCode = null;
+    hostCodeBox.style.display = 'none';
+    btnStartHost.style.display = 'flex';
+    btnStartHost.disabled = false;
+    btnStartHost.textContent = '🚀 Start Sharing & Create Code';
+
+    localPreviewVideo.style.display = 'none';
+    if (statusText) statusText.textContent = 'Ready';
+
+    loadDesktopSources();
   });
 
   // Copy Code
@@ -198,6 +218,8 @@ document.addEventListener('DOMContentLoaded', () => {
       btnJoinSession.textContent = 'Connecting to Host...';
       if (statusText) statusText.textContent = `Connecting (${rawCode})...`;
 
+      console.log(`[P2PMediaSDK] 🔗 Viewer connecting to session code ${rawCode} (Room: ${cleanRoomId})...`);
+
       await sdk.connect(cleanRoomId);
     } catch (err: any) {
       btnJoinSession.disabled = false;
@@ -207,24 +229,45 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // SDK Remote Track Handler (Viewer receives video + audio)
-  sdk.events.on('track-added', (track, stream, peerId) => {
+  sdk.events.on('track-added', async (track, stream, peerId) => {
     landingView.style.display = 'none';
     sessionView.style.display = 'flex';
 
     if (remoteVideo) {
       remoteVideo.srcObject = stream;
+      remoteVideo.muted = isAudioMuted;
+      btnToggleAudio.textContent = isAudioMuted ? '🔇 Unmute Audio' : '🔊 Mute Audio';
       remoteVideo.play().catch(console.error);
     }
 
-    if (statusText) statusText.textContent = `Connected (${peerId})`;
+    const stats = await sdk.getConnectionStats();
+    const typeLabel = stats && stats.candidateType ? stats.candidateType.toUpperCase() : 'P2P';
+    if (statusText) statusText.textContent = `Connected (${typeLabel} - ${peerId})`;
   });
 
   // P2P Connection State Listener
-  sdk.events.on('connection-state-change', (state) => {
+  sdk.events.on('connection-state-change', async (state) => {
     if (state === 'connected') {
-      if (hostWaitMsg) hostWaitMsg.textContent = '✓ Remote user connected! Sharing screen & audio...';
-      if (statusText) statusText.textContent = 'Live Connected';
+      const stats = await sdk.getConnectionStats();
+      const typeDesc = stats && stats.connectionTypeDescription ? stats.connectionTypeDescription : 'Direct P2P';
+      const trackerUrl = stats && stats.activeTrackerUrl ? stats.activeTrackerUrl : 'Electron IPC Bus';
+      const stunTurnUrl = stats && stats.activeStunTurnUrl ? stats.activeStunTurnUrl : 'Direct Local Network';
+      const candidateType = stats && stats.candidateType ? stats.candidateType.toUpperCase() : 'HOST';
+
+      // Log detailed connection block to DevTools and Terminal Console
+      console.log(
+        `[P2PMediaSDK] 📶 WebRTC P2P CONNECTION ESTABLISHED!\n` +
+        `  • Candidate Type    : ${candidateType}\n` +
+        `  • Connection Mode   : ${typeDesc}\n` +
+        `  • Signaling Tracker : ${trackerUrl}\n` +
+        `  • Active STUN/TURN  : ${stunTurnUrl}\n` +
+        `  • Transport Protocol: ${stats?.protocol || 'udp'}`
+      );
+
+      if (hostWaitMsg) hostWaitMsg.textContent = `✓ Connected via ${typeDesc}`;
+      if (statusText) statusText.textContent = `Connected (${typeDesc})`;
     } else if (state === 'disconnected') {
+      console.log('[P2PMediaSDK] 🔴 Session Disconnected');
       if (statusText) statusText.textContent = 'Disconnected';
     }
   });

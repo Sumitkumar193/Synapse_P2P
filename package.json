@@ -8,6 +8,7 @@
     "dev": "cross-env NODE_ENV=development tsc --watch",
     "typecheck": "tsc --noEmit",
     "start": "cross-env NODE_ENV=development electron .",
+    "test": "tsx test/index.ts",
     "clean": "rimraf dist"
   },
   "keywords": [

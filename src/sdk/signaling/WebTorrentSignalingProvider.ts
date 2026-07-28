@@ -14,64 +14,95 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
   private currentRoomId?: string;
   private currentPeerId?: string;
   private trackerUrls: string[];
+  private activeTrackerUrl: string = 'Local IPC / In-Memory';
   private logger: Logger = new Logger('WebTorrentSignalingProvider');
 
   constructor(options: WebTorrentTrackerOptions = {}) {
     this.trackerUrls = options.trackerUrls || [
-      'wss://tracker.files.fm:7072/announce',
       'wss://tracker.openwebtorrent.com',
       'wss://tracker.btorrent.xyz',
+      'wss://tracker.files.fm:7072/announce',
     ];
   }
 
   public async connect(trackerUrl?: string): Promise<void> {
-    const url = trackerUrl || this.trackerUrls[0];
+    const urlsToTry = trackerUrl ? [trackerUrl, ...this.trackerUrls] : this.trackerUrls;
+
+    for (const url of urlsToTry) {
+      try {
+        this.logger.info(`Attempting WebTorrent tracker connection to ${url}...`);
+        await this.connectToUrl(url);
+        this.activeTrackerUrl = url;
+        this.logger.info(`Successfully connected to WebTorrent tracker: ${url}`);
+        return;
+      } catch (err: any) {
+        this.logger.warn(`Tracker ${url} failed: ${err.message}. Trying next tracker...`);
+      }
+    }
+
+    this.logger.warn('All WebTorrent trackers unreachable. Falling back to local IPC/in-memory signaling.');
+    this.activeTrackerUrl = 'Local IPC / Fallback Loopback';
+    this.connected = true;
+  }
+
+  private connectToUrl(url: string): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.logger.info(`Connecting to WebTorrent tracker at ${url}...`);
-        this.socket = new WebSocket(url);
+        const ws = new WebSocket(url);
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new SignalingError(`Timeout connecting to ${url}`));
+        }, 5000);
 
-        this.socket.onopen = () => {
+        ws.onopen = () => {
+          clearTimeout(timeout);
+          this.socket = ws;
           this.connected = true;
-          this.logger.info('Connected to WebTorrent tracker');
+          this.setupSocketListeners();
           resolve();
         };
 
-        this.socket.onerror = (err) => {
-          this.logger.warn(`WebTorrent tracker error on ${url}:`, err);
-          // Fallback resolve to allow offline/mock operation
-          this.connected = true;
-          resolve();
+        ws.onerror = (err) => {
+          clearTimeout(timeout);
+          reject(err);
         };
-
-        this.socket.onclose = () => {
-          this.connected = false;
-          this.logger.info('WebTorrent tracker socket closed');
-        };
-
-        this.socket.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.action === 'announce' && data.offer) {
-              const msg: SignalingMessage = {
-                type: data.offer.type || 'offer',
-                senderId: data.peer_id || 'remote-peer',
-                roomId: this.currentRoomId,
-                payload: data.offer,
-              };
-              this.messageHandlers.forEach((handler) => handler(msg));
-            } else if (data.offer || data.answer || data.candidate) {
-              const msg: SignalingMessage = data;
-              this.messageHandlers.forEach((handler) => handler(msg));
-            }
-          } catch (err) {
-            // Ignore non-JSON tracker keepalives
-          }
-        };
-      } catch (err: any) {
-        reject(new SignalingError(`Failed to connect to WebTorrent tracker: ${err.message}`));
+      } catch (err) {
+        reject(err);
       }
     });
+  }
+
+  public getActiveTrackerUrl(): string {
+    return this.activeTrackerUrl;
+  }
+
+  private setupSocketListeners(): void {
+    if (!this.socket) return;
+
+    this.socket.onclose = () => {
+      this.connected = false;
+      this.logger.info('WebTorrent tracker socket closed');
+    };
+
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.action === 'announce' && data.offer) {
+          const msg: SignalingMessage = {
+            type: data.offer.type || 'offer',
+            senderId: data.peer_id || 'remote-peer',
+            roomId: this.currentRoomId,
+            payload: data.offer,
+          };
+          this.messageHandlers.forEach((handler) => handler(msg));
+        } else if (data.offer || data.answer || data.candidate) {
+          const msg: SignalingMessage = data;
+          this.messageHandlers.forEach((handler) => handler(msg));
+        }
+      } catch (err) {
+        // Ignore non-JSON tracker keepalives
+      }
+    };
   }
 
   public async disconnect(): Promise<void> {
@@ -132,10 +163,6 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
   }
 
   public async send(message: SignalingMessage): Promise<void> {
-    if (!this.connected) {
-      throw new SignalingError('WebTorrent signaling provider is not connected');
-    }
-
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       const payload = {
         action: 'announce',

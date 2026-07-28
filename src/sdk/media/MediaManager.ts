@@ -71,10 +71,14 @@ export class MediaManager {
         }
       }
 
-      // If microphone is requested, capture mic track and mix/attach
+      // If microphone is requested, capture mic track with Acoustic Echo Cancellation
       if (includeMicrophone) {
         try {
-          const micTrack = await this.captureMicrophone();
+          const micTrack = await this.captureMicrophone({
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          });
           const audioTracks = stream.getAudioTracks();
 
           if (audioTracks.length > 0) {
@@ -102,15 +106,29 @@ export class MediaManager {
     try {
       const constraints: MediaStreamConstraints = {
         audio: {
-          echoCancellation: options.echoCancellation ?? true,
-          noiseSuppression: options.noiseSuppression ?? true,
-          autoGainControl: options.autoGainControl ?? true,
+          echoCancellation: { exact: true },
+          noiseSuppression: { exact: true },
+          autoGainControl: { exact: true },
           deviceId: options.deviceId ? { exact: options.deviceId } : undefined,
-        },
+        } as any,
         video: false,
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        // Fallback ideal echo cancellation
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        });
+      }
+
       const audioTrack = stream.getAudioTracks()[0];
       if (!audioTrack) {
         throw new MediaError('No audio track returned by getUserMedia');

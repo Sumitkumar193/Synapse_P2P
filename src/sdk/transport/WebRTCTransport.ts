@@ -14,12 +14,22 @@ export interface WebRTCTransportOptions {
   eventEmitter: TypedEventEmitter<SDKEventMap>;
 }
 
+export interface ConnectionStats {
+  candidateType: 'host' | 'srflx' | 'prflx' | 'relay' | string;
+  localIp?: string;
+  remoteIp?: string;
+  protocol?: string;
+  activeStunTurnUrl: string;
+  connectionTypeDescription: string;
+}
+
 export class WebRTCTransport {
   private peerConnection?: RTCPeerConnection;
   private dataChannel?: RTCDataChannel;
   private options: WebRTCTransportOptions;
   private logger: Logger;
   private connectionState: ConnectionState = 'disconnected';
+  private localStream?: MediaStream;
 
   constructor(options: WebRTCTransportOptions) {
     this.options = options;
@@ -44,13 +54,13 @@ export class WebRTCTransport {
     if (!this.peerConnection) return;
 
     this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate && this.options.targetPeerId) {
+      if (event.candidate && event.candidate.candidate && this.options.targetPeerId) {
         this.options.signalingProvider.send({
           type: 'ice-candidate',
           senderId: this.options.peerId,
           targetId: this.options.targetPeerId,
           roomId: this.options.roomId,
-          payload: event.candidate,
+          payload: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate,
         });
       }
     };
@@ -110,7 +120,6 @@ export class WebRTCTransport {
     if (!this.peerConnection) await this.initialize();
     this.options.targetPeerId = targetPeerId;
 
-    // Create optional DataChannel
     const channel = this.peerConnection!.createDataChannel('p2p-data');
     this.setupDataChannel(channel);
 
@@ -148,12 +157,21 @@ export class WebRTCTransport {
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
   }
 
-  public async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    if (!this.peerConnection) return;
-    await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+  public async handleIceCandidate(candidate: any): Promise<void> {
+    if (!this.peerConnection || !candidate) return;
+    try {
+      // Validate candidate string and sdpMid / sdpMLineIndex
+      if (candidate.candidate && typeof candidate.candidate === 'string' && candidate.candidate.trim() !== '') {
+        const rtcCandidate = new RTCIceCandidate(candidate);
+        await this.peerConnection.addIceCandidate(rtcCandidate);
+      }
+    } catch (e: any) {
+      this.logger.warn('Skipping unparseable ICE candidate:', e?.message || e);
+    }
   }
 
   public addStream(stream: MediaStream): void {
+    this.localStream = stream;
     if (!this.peerConnection) return;
     stream.getTracks().forEach((track) => {
       this.peerConnection!.addTrack(track, stream);
@@ -168,16 +186,86 @@ export class WebRTCTransport {
     }
   }
 
+  public async getConnectionStats(): Promise<ConnectionStats | null> {
+    if (!this.peerConnection) return null;
+
+    try {
+      const stats = await this.peerConnection.getStats();
+      let activePair: any = null;
+      let activeLocalCandidate: any = null;
+      let activeRemoteCandidate: any = null;
+
+      stats.forEach((report) => {
+        if (report.type === 'transport' && report.selectedCandidatePairId) {
+          activePair = stats.get(report.selectedCandidatePairId);
+        }
+      });
+
+      if (activePair) {
+        activeLocalCandidate = stats.get(activePair.localCandidateId);
+        activeRemoteCandidate = stats.get(activePair.remoteCandidateId);
+      }
+
+      if (!activeLocalCandidate) {
+        stats.forEach((report) => {
+          if (report.type === 'candidate-pair' && (report.state === 'succeeded' || report.nominated)) {
+            activeLocalCandidate = stats.get(report.localCandidateId);
+            activeRemoteCandidate = stats.get(report.remoteCandidateId);
+          }
+        });
+      }
+
+      if (activeLocalCandidate) {
+        const type = activeLocalCandidate.candidateType || 'host';
+        let desc = 'Direct P2P / Local LAN Connection (Host)';
+        let stunTurnUrl = 'Direct Local Network (Host Loopback)';
+
+        if (type === 'srflx') {
+          desc = 'STUN Server Reflexive P2P Connection (Internet)';
+          stunTurnUrl = activeLocalCandidate.url || 'stun:stun.l.google.com:19302';
+        } else if (type === 'relay') {
+          desc = 'TURN Relayed Server Connection (Fallback)';
+          stunTurnUrl = activeLocalCandidate.url || 'turn:openrelay.metered.ca:80';
+        }
+
+        return {
+          candidateType: type,
+          localIp: activeLocalCandidate.ip || activeLocalCandidate.address,
+          remoteIp: activeRemoteCandidate?.ip || activeRemoteCandidate?.address,
+          protocol: activeLocalCandidate.protocol || 'udp',
+          activeStunTurnUrl: stunTurnUrl,
+          connectionTypeDescription: desc,
+        };
+      }
+    } catch (e) {
+      this.logger.warn('Failed to fetch WebRTC stats:', e);
+    }
+
+    return {
+      candidateType: 'host',
+      activeStunTurnUrl: 'Direct Local IPC / Loopback',
+      connectionTypeDescription: 'Direct P2P (Electron IPC / Local Network)',
+    };
+  }
+
   private setupSignalingListeners(): void {
     this.options.signalingProvider.onMessage(async (msg: SignalingMessage) => {
       if (msg.targetId && msg.targetId !== this.options.peerId) return;
 
       try {
         switch (msg.type) {
+          case 'peer-joined':
+            if (msg.senderId !== this.options.peerId) {
+              this.logger.info(`Peer ${msg.senderId} joined room ${msg.roomId}. Initiating WebRTC offer...`);
+              await this.createOffer(msg.senderId);
+            }
+            break;
           case 'offer':
+            this.logger.info(`Received offer from ${msg.senderId}. Sending answer...`);
             await this.handleOffer(msg.payload, msg.senderId);
             break;
           case 'answer':
+            this.logger.info(`Received answer from ${msg.senderId}.`);
             await this.handleAnswer(msg.payload);
             break;
           case 'ice-candidate':
