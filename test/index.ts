@@ -105,6 +105,15 @@ async function runTestSuite() {
   assert(mockStats.activeStunTurnUrl.includes('stun:'), `Active STUN Server: ${mockStats.activeStunTurnUrl}`);
   assert(mockStats.fallbackReason.includes('turn:'), `Active TURN Fallback Server: ${mockStats.fallbackReason}`);
 
+  // TEST 7: AI Agent Exposure APIs (Streams, Audio Mixer & Screenshot Interface)
+  console.log('\n🔹 [7/7] Testing AI Agent Exposure API Namespace (sdk.ai)...');
+  assert(typeof sdk.ai === 'object', 'sdk.ai namespace exposed cleanly');
+  assert(typeof sdk.ai.getVideoTrack === 'function', 'sdk.ai.getVideoTrack method available');
+  assert(typeof sdk.ai.getMicTrack === 'function', 'sdk.ai.getMicTrack method available');
+  assert(typeof sdk.ai.getSpeakerTrack === 'function', 'sdk.ai.getSpeakerTrack method available');
+  assert(typeof sdk.ai.getCombinedAudioStream === 'function', 'sdk.ai.getCombinedAudioStream method available');
+  assert(typeof sdk.ai.takeScreenshot === 'function', 'sdk.ai.takeScreenshot method available');
+
   // Summary
   console.log('\n====================================================');
   console.log(`📊 TEST SUITE SUMMARY: ${passed} PASSED | ${failed} FAILED`);

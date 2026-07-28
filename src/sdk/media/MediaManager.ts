@@ -167,4 +167,74 @@ export class MediaManager {
   public getActiveStream(): MediaStream | undefined {
     return this.activeLocalStream;
   }
+
+  public getCombinedAudioStream(remoteStream?: MediaStream | null): MediaStream | null {
+    const audioTracks: MediaStreamTrack[] = [];
+
+    if (this.activeLocalStream) {
+      audioTracks.push(...this.activeLocalStream.getAudioTracks());
+    }
+    if (remoteStream) {
+      audioTracks.push(...remoteStream.getAudioTracks());
+    }
+
+    if (audioTracks.length === 0) return null;
+    if (audioTracks.length === 1) return new MediaStream([audioTracks[0]]);
+
+    try {
+      const mixedTrack = this.mixAudioTracks(audioTracks);
+      return new MediaStream([mixedTrack]);
+    } catch (err) {
+      this.logger.warn('Failed to mix audio tracks, returning fallback stream', err);
+      return new MediaStream(audioTracks);
+    }
+  }
+
+  public async takeScreenshot(
+    stream?: MediaStream | null,
+    options: { format?: 'png' | 'jpeg'; quality?: number } = {}
+  ): Promise<{ base64: string; timestamp: number }> {
+    const targetStream = stream || this.activeLocalStream;
+    if (!targetStream) {
+      throw new MediaError('No active video stream available for screenshot');
+    }
+
+    const videoTrack = targetStream.getVideoTracks()[0];
+    if (!videoTrack) {
+      throw new MediaError('No video track found in target stream');
+    }
+
+    const videoElement = document.createElement('video');
+    videoElement.muted = true;
+    videoElement.playsInline = true;
+    videoElement.srcObject = new MediaStream([videoTrack]);
+    
+    await videoElement.play().catch(() => {});
+
+    await new Promise((res) => setTimeout(res, 60));
+
+    const width = videoElement.videoWidth || 1920;
+    const height = videoElement.videoHeight || 1080;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new MediaError('Failed to get 2D canvas context');
+
+    ctx.drawImage(videoElement, 0, 0, width, height);
+
+    const format = options.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const base64 = canvas.toDataURL(format, options.quality || 0.92);
+
+    videoElement.pause();
+    videoElement.srcObject = null;
+    videoElement.remove();
+
+    return {
+      base64,
+      timestamp: Date.now(),
+    };
+  }
 }

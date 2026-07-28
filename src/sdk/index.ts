@@ -208,4 +208,59 @@ export class P2PMediaSDK {
   private generatePeerId(): string {
     return `peer_${Math.random().toString(36).substring(2, 9)}`;
   }
+
+  // =========================================================================
+  // 🤖 AI AGENT EXPOSURE APIS (Video, Mic, Speaker Streams & Screenshot)
+  // =========================================================================
+
+  public getRemoteStream(): MediaStream | null {
+    return this.transport?.getRemoteStream() || null;
+  }
+
+  public getVideoTrack(): MediaStreamTrack | null {
+    const remote = this.getRemoteStream();
+    if (remote && remote.getVideoTracks().length > 0) {
+      return remote.getVideoTracks()[0];
+    }
+    const local = this.mediaManager.getActiveStream();
+    if (local && local.getVideoTracks().length > 0) {
+      return local.getVideoTracks()[0];
+    }
+    return null;
+  }
+
+  public getMicTrack(): MediaStreamTrack | null {
+    const local = this.mediaManager.getActiveStream();
+    if (local && local.getAudioTracks().length > 0) {
+      return local.getAudioTracks()[0];
+    }
+    return null;
+  }
+
+  public getSpeakerTrack(): MediaStreamTrack | null {
+    const remote = this.getRemoteStream();
+    if (remote && remote.getAudioTracks().length > 0) {
+      return remote.getAudioTracks()[0];
+    }
+    return null;
+  }
+
+  public getCombinedAudioStream(): MediaStream | null {
+    return this.mediaManager.getCombinedAudioStream(this.getRemoteStream());
+  }
+
+  public async takeScreenshot(options?: { format?: 'png' | 'jpeg'; quality?: number }): Promise<{ base64: string; timestamp: number }> {
+    const targetStream = this.getRemoteStream() || this.mediaManager.getActiveStream();
+    return await this.mediaManager.takeScreenshot(targetStream, options);
+  }
+
+  public get ai() {
+    return {
+      getVideoTrack: () => this.getVideoTrack(),
+      getMicTrack: () => this.getMicTrack(),
+      getSpeakerTrack: () => this.getSpeakerTrack(),
+      getCombinedAudioStream: () => this.getCombinedAudioStream(),
+      takeScreenshot: (options?: { format?: 'png' | 'jpeg'; quality?: number }) => this.takeScreenshot(options),
+    };
+  }
 }

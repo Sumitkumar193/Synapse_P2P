@@ -87,3 +87,20 @@ To handle asynchronous WebRTC signaling over WebSocket trackers or IPC where net
 - **Zip Compression**: PowerShell `Compress-Archive`
 - **Output Artifact**: `release/P2PScreenShare-Portable.zip`
 - **Distribution Model**: Standalone zero-installer portable zip.
+
+---
+
+## 🤖 6. AI Agent Exposure API (`sdk.ai`)
+
+To support multi-modal AI agents without incurring high bandwidth and Vision API costs from continuous video streaming:
+
+1. **Individual Track Exposure**:
+   - `sdk.ai.getVideoTrack()`: Raw `MediaStreamTrack` for video.
+   - `sdk.ai.getMicTrack()`: Microphone audio track.
+   - `sdk.ai.getSpeakerTrack()`: Remote/System speaker audio track.
+2. **WebAudio Combined Audio Mixer (`sdk.ai.getCombinedAudioStream()`)**:
+   - Mixes mic and speaker audio tracks into a single `MediaStream` using Web Audio API `AudioContext` nodes.
+   - Feed directly into Whisper Speech-to-Text (STT) for continuous low-cost conversation monitoring.
+3. **On-Demand Screenshot Trigger (`sdk.ai.takeScreenshot()`)**:
+   - When the LLM Agent decides visual context is needed from Whisper transcripts, it invokes `takeScreenshot()`.
+   - Returns high-resolution Base64 PNG/JPEG string (`data:image/png;base64,...`) and timestamp, allowing Vision LLMs to inspect static images on-demand.

@@ -390,6 +390,10 @@ export class WebRTCTransport {
     };
   }
 
+  public getRemoteStream(): MediaStream | null {
+    return this.remoteStream || null;
+  }
+
   private onMessageHandler?: (msg: SignalingMessage) => void;
 
   private setupSignalingListeners(): void {

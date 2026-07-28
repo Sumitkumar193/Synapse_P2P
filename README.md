@@ -20,8 +20,9 @@ A production-grade, frameless **Electron P2P Screen Sharing Application & TypeSc
 * **🔒 Source & Settings Locking**: Automatically locks display source cards, audio checkboxes, and rescan controls during active screen sharing sessions.
 * **🛑 Clean Teardown & Custom Modals**: Native dark-mode glassmorphic `<NotificationModal />` dialogs (replacing browser alerts) and direct status badge updates (`🟢 Ready`).
 * **🎛️ Ultra-Modern Floating Controls**: Compact glassmorphic pill bar with mute, fullscreen toggle with `Esc` key sync, and end session controls.
+* **🤖 AI Agent Exposure API (`sdk.ai`)**: Built-in exposure for raw video, mic, speaker tracks, WebAudio combined audio mixing (for Whisper STT), and on-demand `takeScreenshot()` for Vision LLMs.
 * **📊 Connection Inspection**: Live connection status badges detailing active candidate types (`HOST`, `STUN`, `TURN`), IP addresses, and transport protocols via `sdk.getConnectionStats()`.
-* **🧪 100% Automated Test Suite**: 11-step TypeScript test runner (`npm test`).
+* **🧪 100% Automated Test Suite**: 17-step TypeScript test runner (`npm test`).
 
 ---
 
