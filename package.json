@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "start": "cross-env NODE_ENV=development electron .",
     "test": "tsx test/index.ts",
-    "clean": "rimraf dist"
+    "package:portable": "npm run build && npx -y electron-packager . P2PScreenShare --platform=win32 --arch=x64 --out=release --overwrite && node -e \"const fs = require('fs'); const { execSync } = require('child_process'); if (fs.existsSync('release/P2PScreenShare-Portable.zip')) fs.unlinkSync('release/P2PScreenShare-Portable.zip'); console.log('Zipping portable application package...'); execSync('powershell Compress-Archive -Path ./release/P2PScreenShare-win32-x64/* -DestinationPath ./release/P2PScreenShare-Portable.zip -Force', {stdio: 'inherit'}); console.log('✅ Created release/P2PScreenShare-Portable.zip');\"",
+    "clean": "rimraf dist release"
   },
   "keywords": [
     "electron",

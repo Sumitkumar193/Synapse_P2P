@@ -27,12 +27,17 @@ export class P2PMediaSDK {
     this.config = {
       autoConnect: true,
       iceServers: [
-        // Public STUN Servers (IP Discovery)
+        // Cloudflare STUN Server (Ultra-fast Global Anycast IP Discovery)
+        { urls: 'stun:stun.cloudflare.com:3478' },
+
+        // Google STUN Servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+
+        // Metered STUN Server
         { urls: 'stun:openrelay.metered.ca:80' },
 
-        // Free OpenRelay TURN Fallback Servers (UDP & TCP for Firewalls)
+        // Free OpenRelay TURN Fallback Relays (UDP & TCP for Firewalls)
         {
           urls: 'turn:openrelay.metered.ca:80',
           username: 'openrelay',

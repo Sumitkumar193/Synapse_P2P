@@ -1,17 +1,30 @@
+# Environment Variables (Secrets)
+.env
+.env.*
+!.env.example
+
 # Node dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 
-# Build outputs
+# Build outputs & Executables
 dist/
+release/
 out/
 build/
 *.tsbuildinfo
+*.7z
+*.zip
+*.exe
 
 # OS & IDE files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Scratch & Temporary files
+scratch/

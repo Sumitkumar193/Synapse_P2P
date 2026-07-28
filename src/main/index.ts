@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, NativeImage } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 
 // Load environment variables from .env
@@ -13,9 +14,80 @@ import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
 
 let windows: Set<BrowserWindow> = new Set();
+let tray: Tray | null = null;
+let isQuitting: boolean = false;
+
+function createTrayIcon(): NativeImage {
+  const iconPath = path.join(__dirname, '../../assets/icon.jpg');
+  if (fs.existsSync(iconPath)) {
+    return nativeImage.createFromPath(iconPath).resize({ width: 32, height: 32 });
+  }
+
+  // SVG fallback if asset not present
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <rect width="32" height="32" rx="8" fill="#6366f1"/>
+    <text x="16" y="21" font-size="13" font-weight="bold" fill="white" text-anchor="middle" font-family="sans-serif">P2P</text>
+  </svg>`;
+  return nativeImage.createFromBuffer(Buffer.from(svg));
+}
+
+function setupTray(): void {
+  if (tray) return;
+
+  const icon = createTrayIcon();
+  tray = new Tray(icon);
+  tray.setToolTip('P2P Screen Share');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '📺 Open P2P Screen Share',
+      click: () => {
+        windows.forEach((win) => {
+          if (!win.isDestroyed()) {
+            win.show();
+            win.focus();
+          }
+        });
+        if (windows.size === 0) {
+          createWindow();
+        }
+      },
+    },
+    {
+      label: '➕ Open 2nd Window',
+      click: () => {
+        createWindow();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '🚪 Quit App',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on('click', () => {
+    windows.forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.show();
+        win.focus();
+      }
+    });
+    if (windows.size === 0) {
+      createWindow();
+    }
+  });
+}
 
 function createWindow(): BrowserWindow {
   Menu.setApplicationMenu(null);
+
+  const iconPath = path.join(__dirname, '../../assets/icon.jpg');
 
   const win = new BrowserWindow({
     width: 1280,
@@ -23,6 +95,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 700,
     title: 'P2P Screen Share',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     frame: false,
     transparent: false,
     backgroundColor: '#0f172a',
@@ -55,8 +128,15 @@ function createWindow(): BrowserWindow {
     console.error('Failed to load renderer HTML:', err);
   });
 
-  win.on('closed', () => {
-    windows.delete(win);
+  // Minimize to Tray on Close
+  win.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      win.hide();
+      console.log('[System Tray] 📌 Window minimized to system tray.');
+    } else {
+      windows.delete(win);
+    }
   });
 
   return win;
@@ -69,6 +149,8 @@ app.whenReady().then(() => {
     () => BrowserWindow.getFocusedWindow() || (windows.size > 0 ? Array.from(windows)[0] : null),
     () => createWindow()
   );
+
+  setupTray();
   createWindow();
 
   app.on('activate', () => {
@@ -78,8 +160,12 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && isQuitting) {
     app.quit();
   }
 });
