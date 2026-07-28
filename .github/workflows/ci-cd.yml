@@ -1,0 +1,86 @@
+name: CI/CD Pipeline - Build, Test & Release
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: 🧪 Build & Test (Windows 64-bit)
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🛠️ Build Main, Preload & Renderer
+        run: npm run build
+
+      - name: 🔍 TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: 🧪 Run Automated Test Suite
+        run: npm test
+
+  package-and-release:
+    name: 📦 Package & Draft Release
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🎁 Package Portable Application (.zip)
+        run: npm run package:portable
+
+      - name: 📤 Upload Build Artifact to GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: P2PScreenShare-Portable
+          path: release/P2PScreenShare-Portable.zip
+          retention-days: 30
+
+      - name: 🚀 Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/P2PScreenShare-Portable.zip
+          draft: false
+          prerelease: false
+          body: |
+            ## 📺 P2P Screen Share Release
+
+            ### 🚀 Download & Run Portable Version:
+            1. Download `P2PScreenShare-Portable.zip`.
+            2. Extract all contents.
+            3. Double-click `P2PScreenShare.exe` to launch immediately!
+
+            ---
+            *Built automatically via GitHub Actions CI/CD Pipeline.*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
