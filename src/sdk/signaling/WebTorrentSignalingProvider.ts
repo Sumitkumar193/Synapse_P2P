@@ -1,6 +1,5 @@
 import { ISignalingProvider, SignalingMessageHandler } from './ISignalingProvider';
 import { SignalingMessage } from '../types';
-import { SignalingError } from '../utils/Errors';
 import { Logger } from '../utils/Logger';
 
 export interface WebTorrentTrackerOptions {
@@ -8,13 +7,14 @@ export interface WebTorrentTrackerOptions {
 }
 
 export class WebTorrentSignalingProvider implements ISignalingProvider {
-  private socket?: WebSocket;
+  private sockets: Map<string, WebSocket> = new Map();
   private connected: boolean = false;
   private messageHandlers: Set<SignalingMessageHandler> = new Set();
+  private processedMessageKeys: Set<string> = new Set();
   private currentRoomId?: string;
   private currentPeerId?: string;
   private trackerUrls: string[];
-  private activeTrackerUrl: string = 'Local IPC / In-Memory';
+  private activeTrackerUrl: string = 'Multi-Tracker Mesh';
   private logger: Logger = new Logger('WebTorrentSignalingProvider');
 
   constructor(options: WebTorrentTrackerOptions = {}) {
@@ -27,22 +27,29 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
 
   public async connect(trackerUrl?: string): Promise<void> {
     const urlsToTry = trackerUrl ? [trackerUrl, ...this.trackerUrls] : this.trackerUrls;
+    let connectedCount = 0;
 
-    for (const url of urlsToTry) {
-      try {
-        this.logger.info(`Attempting WebTorrent tracker connection to ${url}...`);
-        await this.connectToUrl(url);
-        this.activeTrackerUrl = url;
-        this.logger.info(`Successfully connected to WebTorrent tracker: ${url}`);
-        return;
-      } catch (err: any) {
-        this.logger.warn(`Tracker ${url} failed: ${err.message}. Trying next tracker...`);
-      }
+    // Connect to ALL available WebTorrent tracker WebSockets simultaneously to form a multi-tracker mesh
+    await Promise.all(
+      urlsToTry.map(async (url) => {
+        try {
+          await this.connectToUrl(url);
+          connectedCount++;
+        } catch (err: any) {
+          this.logger.warn(`Tracker ${url} connection failed: ${err?.message || err}`);
+        }
+      })
+    );
+
+    if (connectedCount > 0) {
+      this.connected = true;
+      this.activeTrackerUrl = `WebTorrent Multi-Tracker Mesh (${connectedCount} Active)`;
+      this.logger.info(`🟢 Connected to ${connectedCount}/${urlsToTry.length} WebTorrent trackers simultaneously`);
+    } else {
+      this.logger.warn('All WebTorrent trackers unreachable. Operating in local loopback mode.');
+      this.activeTrackerUrl = 'Local Loopback';
+      this.connected = true;
     }
-
-    this.logger.warn('All WebTorrent trackers unreachable. Falling back to local IPC/in-memory signaling.');
-    this.activeTrackerUrl = 'Local IPC / Fallback Loopback';
-    this.connected = true;
   }
 
   private connectToUrl(url: string): Promise<void> {
@@ -50,15 +57,14 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
       try {
         const ws = new WebSocket(url);
         const timeout = setTimeout(() => {
-          ws.close();
-          reject(new SignalingError(`Timeout connecting to ${url}`));
-        }, 5000);
+          try { ws.close(); } catch {}
+          reject(new Error(`Timeout connecting to ${url}`));
+        }, 3000);
 
         ws.onopen = () => {
           clearTimeout(timeout);
-          this.socket = ws;
-          this.connected = true;
-          this.setupSocketListeners();
+          this.sockets.set(url, ws);
+          this.setupSocketListeners(url, ws);
           resolve();
         };
 
@@ -76,40 +82,51 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
     return this.activeTrackerUrl;
   }
 
-  private setupSocketListeners(): void {
-    if (!this.socket) return;
-
-    this.socket.onclose = () => {
-      this.connected = false;
-      this.logger.info('WebTorrent tracker socket closed');
+  private setupSocketListeners(url: string, socket: WebSocket): void {
+    socket.onclose = () => {
+      this.sockets.delete(url);
+      if (this.sockets.size === 0) {
+        this.connected = false;
+      }
+      this.logger.info(`WebTorrent tracker socket [${url}] closed`);
     };
 
-    this.socket.onmessage = (event) => {
+    socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        let msg: SignalingMessage | null = null;
+
         if (data.action === 'announce' && data.offer) {
-          const msg: SignalingMessage = {
+          msg = {
             type: data.offer.type || 'offer',
             senderId: data.peer_id || 'remote-peer',
             roomId: this.currentRoomId,
             payload: data.offer,
+            timestamp: data.offer.timestamp,
           };
-          this.messageHandlers.forEach((handler) => handler(msg));
-        } else if (data.offer || data.answer || data.candidate) {
-          const msg: SignalingMessage = data;
-          this.messageHandlers.forEach((handler) => handler(msg));
+        } else if (data.offer || data.answer || data.candidate || data.type) {
+          msg = data as SignalingMessage;
+        }
+
+        if (msg && msg.senderId && msg.type) {
+          const msgKey = `${msg.type}_${msg.senderId}_${msg.timestamp || 0}`;
+          if (msg.senderId !== this.currentPeerId && !this.processedMessageKeys.has(msgKey)) {
+            this.processedMessageKeys.add(msgKey);
+            this.logger.info(`📩 Received WebTorrent message [type=${msg.type}] via tracker [${url}]`);
+            this.messageHandlers.forEach((handler) => handler(msg!));
+          }
         }
       } catch (err) {
-        // Ignore non-JSON tracker keepalives
+        // Ignore non-JSON tracker keepalive signals
       }
     };
   }
 
   public async disconnect(): Promise<void> {
-    if (this.socket) {
-      this.socket.close();
-      this.socket = undefined;
-    }
+    this.sockets.forEach((socket) => {
+      try { socket.close(); } catch {}
+    });
+    this.sockets.clear();
     this.connected = false;
   }
 
@@ -120,7 +137,7 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
     const infoHash = this.hashString(roomId);
     const formattedPeerId = this.hashString(peerId);
 
-    const announceMsg = {
+    const announceMsg = JSON.stringify({
       action: 'announce',
       info_hash: infoHash,
       peer_id: formattedPeerId,
@@ -129,14 +146,17 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
       downloaded: 0,
       left: 0,
       event: 'started',
-    };
+    });
 
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(announceMsg));
-    }
+    // Broadcast announce across ALL open tracker sockets simultaneously
+    this.sockets.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(announceMsg);
+      }
+    });
 
-    // Broadcast peer-joined
-    this.send({
+    // Broadcast peer-joined across all open tracker sockets
+    await this.send({
       type: 'peer-joined',
       senderId: peerId,
       roomId,
@@ -148,31 +168,40 @@ export class WebTorrentSignalingProvider implements ISignalingProvider {
     const infoHash = this.hashString(roomId);
     const formattedPeerId = this.hashString(peerId);
 
-    const announceMsg = {
+    const announceMsg = JSON.stringify({
       action: 'announce',
       info_hash: infoHash,
       peer_id: formattedPeerId,
       event: 'stopped',
-    };
+    });
 
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(announceMsg));
-    }
+    this.sockets.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(announceMsg);
+      }
+    });
 
     this.currentRoomId = undefined;
   }
 
   public async send(message: SignalingMessage): Promise<void> {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      const payload = {
-        action: 'announce',
-        info_hash: this.hashString(message.roomId || this.currentRoomId || 'default'),
-        peer_id: this.hashString(message.senderId),
-        offer: message,
-      };
-      this.socket.send(JSON.stringify(payload));
-    } else {
-      // Fallback local broadcast
+    const payload = JSON.stringify({
+      action: 'announce',
+      info_hash: this.hashString(message.roomId || this.currentRoomId || 'default'),
+      peer_id: this.hashString(message.senderId),
+      offer: message,
+    });
+
+    let sent = false;
+    this.sockets.forEach((socket) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(payload);
+        sent = true;
+      }
+    });
+
+    if (!sent) {
+      // Fallback local broadcast if no sockets are open
       this.messageHandlers.forEach((handler) => handler(message));
     }
   }

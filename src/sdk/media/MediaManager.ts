@@ -21,9 +21,33 @@ declare global {
   }
 }
 
-export class MediaManager {
+import { IMediaProvider } from '../session/media/IMediaProvider';
+
+export class MediaManager implements IMediaProvider {
   private activeLocalStream?: MediaStream;
   private logger: Logger = new Logger('MediaManager');
+
+  public getLocalStream(): MediaStream | null {
+    return this.activeLocalStream || null;
+  }
+
+  public getRemoteStream(): MediaStream | null {
+    return null;
+  }
+
+  public getTrack(kind: 'video' | 'audio'): MediaStreamTrack | null {
+    if (!this.activeLocalStream) return null;
+    const tracks = kind === 'video' ? this.activeLocalStream.getVideoTracks() : this.activeLocalStream.getAudioTracks();
+    return tracks.length > 0 ? tracks[0] : null;
+  }
+
+  public async publishScreen(options: ScreenCaptureOptions): Promise<MediaStream> {
+    return this.captureScreen(options);
+  }
+
+  public stop(): void {
+    this.stopLocalStream();
+  }
 
   public async getDesktopSources(types: ('screen' | 'window')[] = ['screen', 'window']): Promise<DesktopSource[]> {
     if (typeof window !== 'undefined' && window.electronAPI) {

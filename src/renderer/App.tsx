@@ -1,11 +1,19 @@
 import React, { useEffect, useRef } from 'react';
-import { P2PMediaSDK, DesktopSource } from '../sdk';
+import {
+  P2PMediaSDK,
+  DesktopSource,
+  FirebaseSignalingProvider,
+  WebSocketSignalingProvider,
+  WebTorrentSignalingProvider,
+  IPCSignalingProvider,
+  MemorySignalingProvider,
+} from '../sdk';
 import { TitleBar } from './components/TitleBar';
 import { HostCard } from './components/HostCard';
 import { ViewerCard } from './components/ViewerCard';
 import { StreamView } from './components/StreamView';
 import { NotificationModal } from './components/NotificationModal';
-import { useAppStore } from './store/useAppStore';
+import { SignalingMethod, useAppStore } from './store/useAppStore';
 
 export const App: React.FC = () => {
   const sdkRef = useRef<P2PMediaSDK | null>(null);
@@ -15,6 +23,7 @@ export const App: React.FC = () => {
   const activeTab = useAppStore((state) => state.activeTab);
   const sources = useAppStore((state) => state.sources);
   const selectedSourceId = useAppStore((state) => state.selectedSourceId);
+  const signalingMethod = useAppStore((state) => state.signalingMethod);
   const isHosting = useAppStore((state) => state.isHosting);
   const isViewing = useAppStore((state) => state.isViewing);
   const sessionCode = useAppStore((state) => state.sessionCode);
@@ -30,6 +39,7 @@ export const App: React.FC = () => {
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const setSources = useAppStore((state) => state.setSources);
   const setSelectedSourceId = useAppStore((state) => state.setSelectedSourceId);
+  const setSignalingMethod = useAppStore((state) => state.setSignalingMethod);
   const setIsHosting = useAppStore((state) => state.setIsHosting);
   const setIsViewing = useAppStore((state) => state.setIsViewing);
   const setSessionCode = useAppStore((state) => state.setSessionCode);
@@ -43,9 +53,40 @@ export const App: React.FC = () => {
   const closeModal = useAppStore((state) => state.closeModal);
   const resetSessionState = useAppStore((state) => state.resetSessionState);
 
+  const getSignalingProvider = (method: SignalingMethod) => {
+    switch (method) {
+      case 'firebase':
+        return new FirebaseSignalingProvider({
+          databaseURL: 'https://synapse-p2p-default-rtdb.asia-southeast1.firebasedatabase.app',
+        });
+      case 'websocket':
+        return new WebSocketSignalingProvider();
+      case 'webtorrent':
+        return new WebTorrentSignalingProvider();
+      case 'ipc':
+        return new IPCSignalingProvider();
+      case 'memory':
+        return new MemorySignalingProvider();
+      case 'auto':
+      default:
+        return undefined; // Uses default FallbackSignalingProvider
+    }
+  };
+
   useEffect(() => {
-    const sdk = new P2PMediaSDK();
+    if (sdkRef.current) {
+      sdkRef.current.disconnect().catch(console.error);
+    }
+
+    const provider = getSignalingProvider(signalingMethod);
+    const sdk = new P2PMediaSDK({ signalingProvider: provider });
     sdkRef.current = sdk;
+
+    // Probe real-time signaling provider health on application launch
+    sdk.checkSignalingHealth().then((health) => {
+      console.log('[P2P App] Signaling provider health status:', health);
+      setSignalingHealth(health);
+    }).catch(console.error);
 
     // Load initial desktop sources
     loadDesktopSources(sdk);
@@ -73,7 +114,11 @@ export const App: React.FC = () => {
         setStatusState('connected');
         const stats = await sdk.getConnectionStats();
         const typeDesc = stats?.connectionTypeDescription || 'Direct P2P';
-        setStatusText(`Connected (${typeDesc})`);
+        if (isHosting) {
+          setStatusText(`Hosting (${sessionCode || 'Active'} | ${typeDesc})`);
+        } else {
+          setStatusText(`Viewing (${typeDesc})`);
+        }
       } else if (state === 'disconnected') {
         if (isViewing || isHosting) {
           setStatusText('Reconnecting P2P...');
@@ -99,7 +144,7 @@ export const App: React.FC = () => {
       stopTimer();
       sdk.disconnect().catch(console.error);
     };
-  }, []);
+  }, [signalingMethod]);
 
   const loadDesktopSources = async (sdkInstance?: P2PMediaSDK) => {
     const sdk = sdkInstance || sdkRef.current;
@@ -261,11 +306,17 @@ export const App: React.FC = () => {
     }
   };
 
+  const signalingHealth = useAppStore((state) => state.signalingHealth);
+  const setSignalingHealth = useAppStore((state) => state.setSignalingHealth);
+
   return (
     <>
       <TitleBar
         statusText={statusText}
         statusState={statusState}
+        signalingMethod={signalingMethod}
+        signalingHealth={signalingHealth}
+        onSignalingMethodChange={setSignalingMethod}
         onOpen2ndWin={handleOpen2ndWin}
       />
 

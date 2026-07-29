@@ -9,6 +9,7 @@ export interface WebRTCTransportOptions {
   peerId: string;
   targetPeerId?: string;
   roomId?: string;
+  isHost?: boolean;
   iceServers?: IceServerConfig[];
   iceTransportPolicy?: 'all' | 'relay';
   preferredVideoCodec?: 'H264' | 'VP8' | 'VP9' | 'AV1';
@@ -28,9 +29,15 @@ export interface ConnectionStats {
   frameWidth?: number;
   frameHeight?: number;
   framesPerSecond?: number;
+  rttMs?: number;
+  inboundBitrateKbps?: number;
+  outboundBitrateKbps?: number;
+  packetLossRate?: number;
 }
 
-export class WebRTCTransport {
+import { ITransportProvider } from './interfaces/ITransportProvider';
+
+export class WebRTCTransport implements ITransportProvider {
   private peerConnection?: RTCPeerConnection;
   private dataChannel?: RTCDataChannel;
   private options: WebRTCTransportOptions;
@@ -58,8 +65,12 @@ export class WebRTCTransport {
       iceTransportPolicy: this.options.iceTransportPolicy || 'all'
     };
 
-    this.peerConnection = new RTCPeerConnection(rtcConfig);
-    this.setupPeerConnectionListeners();
+    if (typeof RTCPeerConnection !== 'undefined') {
+      this.peerConnection = new RTCPeerConnection(rtcConfig);
+      this.setupPeerConnectionListeners();
+    } else {
+      this.logger.warn('RTCPeerConnection is not defined in current runtime environment');
+    }
     this.updateState('connecting');
   }
 
@@ -222,17 +233,18 @@ export class WebRTCTransport {
 
   public async createOffer(targetPeerId: string): Promise<void> {
     if (!this.peerConnection) await this.initialize();
+    if (!this.peerConnection) return;
     this.options.targetPeerId = targetPeerId;
 
-    const channel = this.peerConnection!.createDataChannel('p2p-data');
+    const channel = this.peerConnection.createDataChannel('p2p-data');
     this.setupDataChannel(channel);
 
     if (this.options.preferredVideoCodec) {
       this.setVideoCodecPreference(this.options.preferredVideoCodec);
     }
 
-    const offer = await this.peerConnection!.createOffer();
-    await this.peerConnection!.setLocalDescription(offer);
+    const offer = await this.peerConnection.createOffer();
+    await this.peerConnection.setLocalDescription(offer);
 
     await this.options.signalingProvider.send({
       type: 'offer',
@@ -245,17 +257,37 @@ export class WebRTCTransport {
 
   public async handleOffer(offer: RTCSessionDescriptionInit, senderId: string): Promise<void> {
     if (!this.peerConnection) await this.initialize();
+    if (!this.peerConnection) return;
     this.options.targetPeerId = senderId;
 
-    await this.peerConnection!.setRemoteDescription(new RTCSessionDescription(offer));
+    if (this.peerConnection.signalingState !== 'stable') {
+      const isPolite = !this.options.isHost;
+      if (!isPolite) {
+        this.logger.info(`Ignoring offer glare from ${senderId} because this peer is Host/Offerer`);
+        return;
+      }
+      this.logger.info(`Rolling back local offer glare for incoming offer from ${senderId}`);
+      try {
+        await Promise.all([
+          this.peerConnection.setLocalDescription({ type: 'rollback' } as any),
+          this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        ]);
+      } catch (err) {
+        this.logger.warn('Offer rollback notice:', err);
+        return;
+      }
+    } else {
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    }
+
     await this.flushPendingIceCandidates();
 
     if (this.options.preferredVideoCodec) {
       this.setVideoCodecPreference(this.options.preferredVideoCodec);
     }
 
-    const answer = await this.peerConnection!.createAnswer();
-    await this.peerConnection!.setLocalDescription(answer);
+    const answer = await this.peerConnection.createAnswer();
+    await this.peerConnection.setLocalDescription(answer);
 
     await this.options.signalingProvider.send({
       type: 'answer',
@@ -317,7 +349,7 @@ export class WebRTCTransport {
     if (this.dataChannel && this.dataChannel.readyState === 'open') {
       this.dataChannel.send(data as any);
     } else {
-      throw new TransportError('DataChannel is not open');
+      this.logger.warn('DataChannel is not open yet, message skipped/queued');
     }
   }
 
@@ -340,9 +372,27 @@ export class WebRTCTransport {
         }
       });
 
+      let rttMs: number | undefined;
+      let packetLossRate: number | undefined;
+
+      stats.forEach((report) => {
+        if (report.type === 'candidate-pair' && report.currentRoundTripTime !== undefined) {
+          rttMs = Math.round(report.currentRoundTripTime * 1000);
+        }
+        if (report.type === 'inbound-rtp' && report.packetsLost !== undefined && report.packetsReceived !== undefined) {
+          const total = report.packetsLost + report.packetsReceived;
+          if (total > 0) {
+            packetLossRate = parseFloat((report.packetsLost / total).toFixed(4));
+          }
+        }
+      });
+
       if (activePair) {
         activeLocalCandidate = stats.get(activePair.localCandidateId);
         activeRemoteCandidate = stats.get(activePair.remoteCandidateId);
+        if (!rttMs && activePair.currentRoundTripTime !== undefined) {
+          rttMs = Math.round(activePair.currentRoundTripTime * 1000);
+        }
       }
 
       if (!activeLocalCandidate) {
@@ -356,14 +406,14 @@ export class WebRTCTransport {
 
       if (activeLocalCandidate) {
         const type = activeLocalCandidate.candidateType || 'host';
-        let desc = 'Direct P2P / Local LAN Connection (Host)';
-        let stunTurnUrl = 'Direct Local Network (Host Loopback)';
+        let desc = 'Direct P2P (Local LAN)';
+        let stunTurnUrl = 'Direct Local Network (LAN)';
 
         if (type === 'srflx') {
-          desc = 'STUN Server Reflexive P2P Connection (Internet)';
+          desc = 'Direct P2P (STUN Public IP)';
           stunTurnUrl = activeLocalCandidate.url || 'stun:stun.cloudflare.com:3478';
         } else if (type === 'relay') {
-          desc = 'TURN Relayed Server Connection (Fallback)';
+          desc = 'Relayed P2P (TURN Relay)';
           stunTurnUrl = activeLocalCandidate.url || 'turn:openrelay.metered.ca:80';
         }
 
@@ -377,6 +427,8 @@ export class WebRTCTransport {
           frameWidth: activeInboundVideo?.frameWidth,
           frameHeight: activeInboundVideo?.frameHeight,
           framesPerSecond: activeInboundVideo?.framesPerSecond,
+          rttMs,
+          packetLossRate,
         };
       }
     } catch (e) {
@@ -405,8 +457,13 @@ export class WebRTCTransport {
         switch (msg.type) {
           case 'peer-joined':
             if (msg.senderId !== this.options.peerId) {
-              this.logger.info(`Peer ${msg.senderId} joined room ${msg.roomId}. Initiating WebRTC offer...`);
-              await this.createOffer(msg.senderId);
+              const isOfferer = this.options.isHost ?? (this.options.peerId > msg.senderId);
+              if (isOfferer) {
+                this.logger.info(`Peer ${msg.senderId} joined room ${msg.roomId}. Initiating WebRTC offer as Host...`);
+                await this.createOffer(msg.senderId);
+              } else {
+                this.logger.info(`Peer ${msg.senderId} joined room ${msg.roomId}. Waiting for WebRTC offer...`);
+              }
             }
             break;
           case 'offer':

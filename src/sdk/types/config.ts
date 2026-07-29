@@ -13,4 +13,5 @@ export interface SDKConfig {
   sessionTimeoutMs?: number; // Expiration window for unestablished host sessions (default: 120000ms = 2 mins)
   autoConnect?: boolean;
   debug?: boolean;
+  signalingProvider?: any;
 }

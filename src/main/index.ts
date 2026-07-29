@@ -6,8 +6,10 @@ import * as dotenv from 'dotenv';
 // Load environment variables from .env
 dotenv.config();
 
-// Set log level for Chromium switches
+// Suppress Chromium internal C++ log noise (WGC static frame timeouts)
 app.commandLine.appendSwitch('log-level', '3');
+app.commandLine.appendSwitch('disable-features', 'WGCWindowCapturer,WGCDisplayCapturer,WgcCapturer');
+app.commandLine.appendSwitch('enable-features', 'GDIWindowCapturer');
 
 import { setupDesktopCapturerIPC } from './ipc/desktopCapturerHandler';
 import { setupWindowIPC } from './ipc/windowHandler';
@@ -114,10 +116,12 @@ function createWindow(): BrowserWindow {
     if (
       message.includes('P2PMediaSDK') ||
       message.includes('WebRTC') ||
-      message.includes('CONNECTION') ||
+      message.includes('Firebase') ||
       message.includes('Signaling') ||
       message.includes('Candidate') ||
-      message.includes('STUN')
+      message.includes('STUN') ||
+      message.includes('📩') ||
+      message.includes('📤')
     ) {
       console.log(`[Terminal Dev Log] ${message}`);
     }

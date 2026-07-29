@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { DesktopSource } from '../../sdk';
 
+export type SignalingMethod = 'auto' | 'firebase' | 'websocket' | 'webtorrent' | 'ipc' | 'memory';
+
 export interface ModalConfig {
   isOpen: boolean;
   title?: string;
@@ -11,6 +13,8 @@ export interface AppState {
   activeTab: 'share' | 'join';
   sources: DesktopSource[];
   selectedSourceId: string;
+  signalingMethod: SignalingMethod;
+  signalingHealth: Record<string, boolean>;
   isHosting: boolean;
   isViewing: boolean;
   sessionCode: string | null;
@@ -26,6 +30,8 @@ export interface AppState {
   setActiveTab: (tab: 'share' | 'join') => void;
   setSources: (sources: DesktopSource[]) => void;
   setSelectedSourceId: (id: string) => void;
+  setSignalingMethod: (method: SignalingMethod) => void;
+  setSignalingHealth: (health: Record<string, boolean>) => void;
   setIsHosting: (isHosting: boolean) => void;
   setIsViewing: (isViewing: boolean) => void;
   setSessionCode: (code: string | null) => void;
@@ -44,6 +50,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeTab: 'share',
   sources: [],
   selectedSourceId: 'screen:0:0',
+  signalingMethod: 'auto',
+  signalingHealth: {
+    firebase: true,
+    websocket: false,
+    webtorrent: true,
+    ipc: true,
+    memory: true,
+  },
   isHosting: false,
   isViewing: false,
   sessionCode: null,
@@ -58,6 +72,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActiveTab: (activeTab) => set({ activeTab }),
   setSources: (sources) => set({ sources }),
   setSelectedSourceId: (selectedSourceId) => set({ selectedSourceId }),
+  setSignalingMethod: (signalingMethod) => set({ signalingMethod }),
+  setSignalingHealth: (signalingHealth) => set({ signalingHealth }),
   setIsHosting: (isHosting) => set({ isHosting }),
   setIsViewing: (isViewing) => set({ isViewing }),
   setSessionCode: (sessionCode) => set({ sessionCode }),

@@ -4,7 +4,7 @@
   "description": "Production-grade Electron P2P Media SDK and Application",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.tsx --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js --jsx=automatic && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
+    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.tsx --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js --jsx=automatic --define:process.env.NODE_ENV='\"production\"' && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
     "dev": "cross-env NODE_ENV=development tsc --watch",
     "typecheck": "tsc --noEmit",
     "start": "npm run build && cross-env NODE_ENV=development electron .",

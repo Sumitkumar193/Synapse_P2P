@@ -3,14 +3,22 @@ import { TypedEventEmitter } from './events/EventEmitter';
 import { SDKEventMap } from './events/events';
 import { MediaManager } from './media/MediaManager';
 import { WebRTCTransport } from './transport/WebRTCTransport';
-import { ISignalingProvider, IPCSignalingProvider, WebTorrentSignalingProvider } from './signaling';
+import {
+  ISignalingProvider,
+  IPCSignalingProvider,
+  WebTorrentSignalingProvider,
+  FirebaseSignalingProvider,
+  WebSocketSignalingProvider,
+  MemorySignalingProvider,
+  FallbackSignalingProvider,
+} from './signaling';
+import { Session } from './session/Session';
 import { Logger } from './utils/Logger';
 
 export * from './types';
 export * from './events/events';
 export * from './utils/Errors';
-export { MediaManager } from './media/MediaManager';
-export { WebRTCTransport } from './transport/WebRTCTransport';
+export * from './session';
 export * from './signaling';
 
 export class P2PMediaSDK {
@@ -22,6 +30,7 @@ export class P2PMediaSDK {
   private logger: Logger;
   private peerId: string;
   private currentRoomId?: string;
+  private currentSession?: Session;
   private sessionTimer?: any;
 
   constructor(config: SDKConfig = {}) {
@@ -65,19 +74,75 @@ export class P2PMediaSDK {
     this.logger = new Logger('P2PMediaSDK');
     this.peerId = this.generatePeerId();
 
-    // Default to Electron IPC signaling provider if in Electron environment, else WebTorrent
-    if (typeof window !== 'undefined' && window.electronAPI?.signaling) {
-      this.signalingProvider = new IPCSignalingProvider();
+    // Priority Signaling Cascade: Firebase > WebSockets > WebTorrents > Electron IPC > Memory
+    if (this.config.signalingProvider) {
+      this.signalingProvider = this.config.signalingProvider;
     } else {
-      this.signalingProvider = new WebTorrentSignalingProvider();
+      const providers: { name: string; provider: ISignalingProvider }[] = [];
+
+      // Safe environment variable access across Node.js & Browser runtimes
+      const env = typeof process !== 'undefined' && process.env ? process.env : {};
+
+      // Priority 1: Firebase Realtime Database
+      const firebaseDbUrl = env.FIREBASE_DATABASE_URL || 'https://synapse-p2p-default-rtdb.asia-southeast1.firebasedatabase.app';
+      if (firebaseDbUrl) {
+        providers.push({
+          name: 'Firebase',
+          provider: new FirebaseSignalingProvider({ databaseURL: firebaseDbUrl }),
+        });
+      }
+
+      // Priority 2: WebSockets
+      if (env.SIGNALING_URL) {
+        providers.push({
+          name: 'WebSocket',
+          provider: new WebSocketSignalingProvider(),
+        });
+      }
+
+      // Priority 3: WebTorrent Trackers
+      providers.push({
+        name: 'WebTorrent',
+        provider: new WebTorrentSignalingProvider(),
+      });
+
+      // Priority 4: Electron IPC
+      if (typeof window !== 'undefined' && (window as any).electronAPI?.signaling) {
+        providers.push({
+          name: 'Electron-IPC',
+          provider: new IPCSignalingProvider(),
+        });
+      }
+
+      // Priority 5: Memory Fallback
+      providers.push({
+        name: 'Memory',
+        provider: new MemorySignalingProvider(),
+      });
+
+      this.signalingProvider = new FallbackSignalingProvider(providers);
     }
 
-    // Cancel session timer when peer connects
+    // Cancel session timer and capture remote peer id when peer connects
     this.events.on('connection-state-change', (state) => {
       if (state === 'connected') {
         this.cancelSessionTimer();
       }
     });
+
+    this.events.on('track-added', (_track, _stream, peerId) => {
+      if (this.currentSession && peerId) {
+        this.currentSession.setRemotePeerId(peerId);
+      }
+    });
+  }
+
+  public session(): Session | null {
+    return this.currentSession || null;
+  }
+
+  public getSession(): Session | null {
+    return this.session();
   }
 
   public async getDesktopSources(types: ('screen' | 'window')[] = ['screen', 'window']): Promise<DesktopSource[]> {
@@ -92,13 +157,14 @@ export class P2PMediaSDK {
     return stream;
   }
 
-  public async connect(roomId: string, isHost: boolean = false): Promise<void> {
+  public async connect(roomId: string, isHost: boolean = false): Promise<Session> {
     const cleanRoomId = roomId.replace(/-/g, '').toLowerCase();
 
     // Close any previous transport instance cleanly before starting a new connection
     if (this.transport) {
       this.transport.close();
       this.transport = undefined;
+      this.currentSession = undefined;
     }
 
     // Generate fresh peerId for each session connection
@@ -107,16 +173,30 @@ export class P2PMediaSDK {
     this.logger.info(`Connecting to room ${cleanRoomId} with peerId ${this.peerId}...`);
 
     await this.signalingProvider.connect(cleanRoomId);
-    await this.signalingProvider.joinRoom(cleanRoomId, this.peerId);
+    await this.signalingProvider.joinRoom(cleanRoomId, this.peerId, isHost);
 
     this.transport = new WebRTCTransport({
       peerId: this.peerId,
       roomId: cleanRoomId,
+      isHost,
       iceServers: this.config.iceServers,
       iceTransportPolicy: this.config.iceTransportPolicy,
       preferredVideoCodec: this.config.preferredVideoCodec,
       signalingProvider: this.signalingProvider,
       eventEmitter: this.events,
+    });
+
+    this.currentSession = new Session({
+      roomId: cleanRoomId,
+      peerId: this.peerId,
+      mediaProvider: this.mediaManager,
+      transportProvider: () => this.transport,
+      signalingProvider: this.signalingProvider,
+      trackerUrlProvider: () => this.getActiveTrackerUrl(),
+      eventEmitter: this.events,
+      onDisconnectHandler: async () => {
+        await this.disconnect();
+      },
     });
 
     await this.transport.initialize();
@@ -131,6 +211,8 @@ export class P2PMediaSDK {
     if (activeStream) {
       this.transport.addStream(activeStream);
     }
+
+    return this.currentSession;
   }
 
   public startSessionTimer(): void {
@@ -159,11 +241,115 @@ export class P2PMediaSDK {
   }
 
   public async getConnectionStats() {
+    if (this.currentSession) {
+      return await this.currentSession.stats.getStats();
+    }
     const stats = this.transport ? await this.transport.getConnectionStats() : null;
     return {
       ...stats,
       activeTrackerUrl: this.getActiveTrackerUrl(),
     };
+  }
+
+  public async checkSignalingHealth(): Promise<Record<string, boolean>> {
+    const health: Record<string, boolean> = {
+      firebase: false,
+      websocket: false,
+      webtorrent: true,
+      ipc: typeof window !== 'undefined' && !!(window as any).electronAPI?.signaling,
+      memory: true,
+    };
+
+    const env = typeof process !== 'undefined' && process.env ? process.env : {};
+
+    // Probe Firebase Realtime DB (HTTPS shallow GET)
+    try {
+      const firebaseDbUrl = env.FIREBASE_DATABASE_URL || 'https://synapse-p2p-default-rtdb.asia-southeast1.firebasedatabase.app';
+      if (typeof fetch !== 'undefined') {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${firebaseDbUrl}/.json?shallow=true`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        health.firebase = res.ok;
+      }
+    } catch {
+      health.firebase = false;
+    }
+
+    // Probe WebSocket Server (WSS)
+    const wsUrl = env.SIGNALING_URL;
+    if (wsUrl && typeof WebSocket !== 'undefined') {
+      try {
+        await new Promise((resolve) => {
+          const socket = new WebSocket(wsUrl);
+          const timeout = setTimeout(() => {
+            try { socket.close(); } catch {}
+            resolve(false);
+          }, 1500);
+
+          socket.onopen = () => {
+            clearTimeout(timeout);
+            health.websocket = true;
+            try { socket.close(); } catch {}
+            resolve(true);
+          };
+
+          socket.onerror = () => {
+            clearTimeout(timeout);
+            health.websocket = false;
+            resolve(false);
+          };
+        });
+      } catch {
+        health.websocket = false;
+      }
+    }
+
+    // Probe WebTorrent Tracker WebSocket
+    health.webtorrent = false;
+    const trackers = [
+      'wss://tracker.openwebtorrent.com',
+      'wss://tracker.btorrent.xyz',
+      'wss://tracker.files.fm:7072/announce',
+    ];
+
+    if (typeof WebSocket !== 'undefined') {
+      for (const trackerUrl of trackers) {
+        try {
+          const isAlive = await new Promise<boolean>((resolve) => {
+            const socket = new WebSocket(trackerUrl);
+            const timeout = setTimeout(() => {
+              try { socket.close(); } catch {}
+              resolve(false);
+            }, 1800);
+
+            socket.onopen = () => {
+              clearTimeout(timeout);
+              try { socket.close(); } catch {}
+              resolve(true);
+            };
+
+            socket.onerror = () => {
+              clearTimeout(timeout);
+              resolve(false);
+            };
+          });
+
+          if (isAlive) {
+            health.webtorrent = true;
+            (health as any).activeTrackerUrl = trackerUrl;
+            break;
+          }
+        } catch {
+          // Try next tracker
+        }
+      }
+    }
+
+    return health;
   }
 
   public async disconnect(): Promise<void> {
@@ -186,6 +372,8 @@ export class P2PMediaSDK {
       this.transport.close();
       this.transport = undefined;
     }
+    this.currentSession = undefined;
+
     if (this.currentRoomId) {
       await this.signalingProvider.disconnect();
       this.currentRoomId = undefined;
@@ -207,60 +395,5 @@ export class P2PMediaSDK {
 
   private generatePeerId(): string {
     return `peer_${Math.random().toString(36).substring(2, 9)}`;
-  }
-
-  // =========================================================================
-  // 🤖 AI AGENT EXPOSURE APIS (Video, Mic, Speaker Streams & Screenshot)
-  // =========================================================================
-
-  public getRemoteStream(): MediaStream | null {
-    return this.transport?.getRemoteStream() || null;
-  }
-
-  public getVideoTrack(): MediaStreamTrack | null {
-    const remote = this.getRemoteStream();
-    if (remote && remote.getVideoTracks().length > 0) {
-      return remote.getVideoTracks()[0];
-    }
-    const local = this.mediaManager.getActiveStream();
-    if (local && local.getVideoTracks().length > 0) {
-      return local.getVideoTracks()[0];
-    }
-    return null;
-  }
-
-  public getMicTrack(): MediaStreamTrack | null {
-    const local = this.mediaManager.getActiveStream();
-    if (local && local.getAudioTracks().length > 0) {
-      return local.getAudioTracks()[0];
-    }
-    return null;
-  }
-
-  public getSpeakerTrack(): MediaStreamTrack | null {
-    const remote = this.getRemoteStream();
-    if (remote && remote.getAudioTracks().length > 0) {
-      return remote.getAudioTracks()[0];
-    }
-    return null;
-  }
-
-  public getCombinedAudioStream(): MediaStream | null {
-    return this.mediaManager.getCombinedAudioStream(this.getRemoteStream());
-  }
-
-  public async takeScreenshot(options?: { format?: 'png' | 'jpeg'; quality?: number }): Promise<{ base64: string; timestamp: number }> {
-    const targetStream = this.getRemoteStream() || this.mediaManager.getActiveStream();
-    return await this.mediaManager.takeScreenshot(targetStream, options);
-  }
-
-  public get ai() {
-    return {
-      getVideoTrack: () => this.getVideoTrack(),
-      getMicTrack: () => this.getMicTrack(),
-      getSpeakerTrack: () => this.getSpeakerTrack(),
-      getCombinedAudioStream: () => this.getCombinedAudioStream(),
-      takeScreenshot: (options?: { format?: 'png' | 'jpeg'; quality?: number }) => this.takeScreenshot(options),
-    };
   }
 }
