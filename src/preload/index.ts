@@ -6,6 +6,8 @@ export interface ElectronAPI {
   maximizeWindow: () => void;
   closeWindow: () => void;
   openNewWindow: () => void;
+  readClipboardText: () => Promise<string>;
+  writeClipboardText: (text: string) => void;
   signaling: {
     joinRoom: (roomId: string, peerId: string) => void;
     leaveRoom: (roomId: string, peerId: string) => void;
@@ -20,6 +22,8 @@ const electronAPI: ElectronAPI = {
   maximizeWindow: () => ipcRenderer.send('WINDOW_MAXIMIZE'),
   closeWindow: () => ipcRenderer.send('WINDOW_CLOSE'),
   openNewWindow: () => ipcRenderer.send('WINDOW_OPEN_NEW'),
+  readClipboardText: () => ipcRenderer.invoke('READ_CLIPBOARD'),
+  writeClipboardText: (text: string) => ipcRenderer.send('WRITE_CLIPBOARD', text),
   signaling: {
     joinRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_JOIN_ROOM', { roomId, peerId }),
     leaveRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_LEAVE_ROOM', { roomId, peerId }),

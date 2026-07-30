@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-07-30
+
+### 🚀 Added
+- **Unified Chat & Shared Media Stream**: Consolidated Chat, File Transfers, and Shared Clipboard into a single chronological stream inside `SideDrawer.tsx`.
+- **Side-by-Side Flex Sidebar (`aside`)**: Redesigned side panel layout from an absolute overlay to a responsive flex sidebar (`aside`) available on both Host and Viewer windows.
+- **Header Chat Toggle & Badge Counter**: Added `💬 Chat` button with live unread badge count to `TitleBar.tsx` for instant sidebar toggling on Host and Viewer windows.
+- **Automatic Host OS Clipboard Sync**: Host application automatically polls OS clipboard (`readClipboardText` via IPC) and broadcasts copied text to the Joiner's chat stream as inline **Clipboard Snippet Cards**.
+- **Inline File Cards & Download Buttons**: Sent and received files render directly in the chat stream with real-time transfer progress bars and 1-click download buttons.
+
+---
+
 ## [1.0.0] - 2026-07-29
 
 ### 🚀 Added

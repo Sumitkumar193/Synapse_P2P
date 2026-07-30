@@ -12,12 +12,15 @@ import { TitleBar } from './components/TitleBar';
 import { HostCard } from './components/HostCard';
 import { ViewerCard } from './components/ViewerCard';
 import { StreamView } from './components/StreamView';
+import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
-import { SignalingMethod, useAppStore } from './store/useAppStore';
+import { ClipboardModal } from './components/ClipboardModal';
+import { SignalingMethod, ChatMessage, useAppStore } from './store/useAppStore';
 
 export const App: React.FC = () => {
   const sdkRef = useRef<P2PMediaSDK | null>(null);
   const timerRef = useRef<any>(null);
+  const lastCopiedRef = useRef<string>('');
 
   // Zustand State Selectors
   const activeTab = useAppStore((state) => state.activeTab);
@@ -34,6 +37,17 @@ export const App: React.FC = () => {
   const remoteStream = useAppStore((state) => state.remoteStream);
   const localStream = useAppStore((state) => state.localStream);
   const modalConfig = useAppStore((state) => state.modalConfig);
+  const clipboardModalConfig = useAppStore((state) => state.clipboardModalConfig);
+
+  // Side Panel Zustand Actions
+  const isSidePanelOpen = useAppStore((state) => state.isSidePanelOpen);
+  const chatMessages = useAppStore((state) => state.chatMessages);
+  const addChatMessage = useAppStore((state) => state.addChatMessage);
+  const updateFileMessageProgress = useAppStore((state) => state.updateFileMessageProgress);
+  const setClipboardText = useAppStore((state) => state.setClipboardText);
+  const setIsSidePanelOpen = useAppStore((state) => state.setIsSidePanelOpen);
+  const showClipboardModal = useAppStore((state) => state.showClipboardModal);
+  const closeClipboardModal = useAppStore((state) => state.closeClipboardModal);
 
   // Zustand Store Actions
   const setActiveTab = useAppStore((state) => state.setActiveTab);
@@ -119,6 +133,65 @@ export const App: React.FC = () => {
         } else {
           setStatusText(`Viewing (${typeDesc})`);
         }
+
+        // Wire up Session Data, File Transfer & Clipboard listeners
+        const currentSession = sdk.session();
+        if (currentSession) {
+          currentSession.data.onMessage((msg) => {
+            try {
+              const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+              if (data && data.type === 'app-chat' && data.text) {
+                addChatMessage({
+                  id: Date.now().toString(),
+                  sender: 'remote',
+                  kind: 'text',
+                  text: data.text,
+                  timestamp: data.timestamp || Date.now(),
+                });
+                setIsSidePanelOpen(true);
+              }
+            } catch {
+              // Ignore non-chat messages
+            }
+          });
+
+          currentSession.files.onReceive((file) => {
+            const blob = new Blob([file.data]);
+            const url = URL.createObjectURL(blob);
+            addChatMessage({
+              id: Date.now().toString(),
+              sender: 'remote',
+              kind: 'file',
+              fileData: {
+                name: file.name,
+                size: file.size,
+                url,
+                isIncoming: true,
+                progress: 100,
+              },
+              timestamp: Date.now(),
+            });
+            setIsSidePanelOpen(true);
+            showNotice(`Received file "${file.name}" in Chat!`, 'File Transfer Received');
+          });
+
+          currentSession.clipboard.onClipboard((text) => {
+            console.log('[P2P App] 📋 Received remote clipboard update:', text);
+            setClipboardText(text);
+
+            // Auto-populate into chat stream
+            addChatMessage({
+              id: Date.now().toString(),
+              sender: 'remote',
+              kind: 'clipboard',
+              clipboardData: { text },
+              timestamp: Date.now(),
+            });
+
+            // Automatically open side chat drawer to show auto-populated clipboard snippet
+            setIsSidePanelOpen(true);
+          });
+        }
       } else if (state === 'disconnected') {
         if (isViewing || isHosting) {
           setStatusText('Reconnecting P2P...');
@@ -140,8 +213,37 @@ export const App: React.FC = () => {
       handleAutoRotateCode();
     });
 
+    // Automatic Host OS Clipboard Monitor (Polls OS clipboard every 1s when active host)
+    const clipboardMonitorInterval = setInterval(async () => {
+      const { isHosting, statusState } = useAppStore.getState();
+      if (isHosting && statusState === 'connected') {
+        try {
+          const currentText = await window.electronAPI?.readClipboardText?.();
+          if (currentText && currentText.trim() && currentText !== lastCopiedRef.current) {
+            lastCopiedRef.current = currentText;
+            console.log('[P2P App] 📋 Host copied text to OS clipboard. Auto-broadcasting to Joiner chat stream:', currentText);
+
+            const session = sdk.session();
+            if (session) {
+              session.clipboard.write(currentText);
+              addChatMessage({
+                id: Date.now().toString(),
+                sender: 'local',
+                kind: 'clipboard',
+                clipboardData: { text: currentText },
+                timestamp: Date.now(),
+              });
+            }
+          }
+        } catch {
+          // Ignore read errors
+        }
+      }
+    }, 1000);
+
     return () => {
       stopTimer();
+      clearInterval(clipboardMonitorInterval);
       sdk.disconnect().catch(console.error);
     };
   }, [signalingMethod]);
@@ -306,6 +408,79 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleSendMessage = (text: string) => {
+    const sdk = sdkRef.current;
+    const session = sdk?.session();
+
+    const msg: ChatMessage = {
+      id: Date.now().toString(),
+      sender: 'local',
+      kind: 'text',
+      text,
+      timestamp: Date.now(),
+    };
+    addChatMessage(msg);
+
+    if (session) {
+      session.data.sendJson({
+        type: 'app-chat',
+        text,
+        timestamp: msg.timestamp,
+      });
+    }
+  };
+
+  const handleSendFile = async (file: File) => {
+    const sdk = sdkRef.current;
+    const session = sdk?.session();
+    if (!session) {
+      showNotice('Must be connected to a peer to send files.', 'File Transfer Error');
+      return;
+    }
+
+    const fileId = Date.now().toString();
+    const arrayBuffer = await file.arrayBuffer();
+
+    const fileMsg: ChatMessage = {
+      id: fileId,
+      sender: 'local',
+      kind: 'file',
+      fileData: {
+        name: file.name,
+        size: file.size,
+        url: URL.createObjectURL(file),
+        isIncoming: false,
+        progress: 0,
+      },
+      timestamp: Date.now(),
+    };
+    addChatMessage(fileMsg);
+
+    session.files.onProgress((progress) => {
+      updateFileMessageProgress(fileId, progress.percentage);
+    });
+
+    await session.files.send(arrayBuffer, file.name);
+  };
+
+  const handleSyncClipboard = (text: string) => {
+    const sdk = sdkRef.current;
+    const session = sdk?.session();
+    setClipboardText(text);
+
+    addChatMessage({
+      id: Date.now().toString(),
+      sender: 'local',
+      kind: 'clipboard',
+      clipboardData: { text },
+      timestamp: Date.now(),
+    });
+
+    if (session) {
+      session.clipboard.write(text);
+    }
+  };
+
   const signalingHealth = useAppStore((state) => state.signalingHealth);
   const setSignalingHealth = useAppStore((state) => state.setSignalingHealth);
 
@@ -316,53 +491,71 @@ export const App: React.FC = () => {
         statusState={statusState}
         signalingMethod={signalingMethod}
         signalingHealth={signalingHealth}
+        chatBadgeCount={chatMessages.length}
+        isChatOpen={isSidePanelOpen}
+        onToggleChat={() => setIsSidePanelOpen(!isSidePanelOpen)}
         onSignalingMethodChange={setSignalingMethod}
         onOpen2ndWin={handleOpen2ndWin}
       />
 
       <div className="app-body">
-        {!isViewing ? (
-          <div className="compact-container">
-            {!isHosting && (
-              <div className="nav-tabs">
-                <button
-                  className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('share')}
-                >
-                  <span>📺</span> Share Screen
-                </button>
-                <button
-                  className={`tab-btn ${activeTab === 'join' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('join')}
-                >
-                  <span>🔗</span> Join Remote Screen
-                </button>
-              </div>
-            )}
+        <div className="app-main-content">
+          {!isViewing ? (
+            <div className="compact-container">
+              {!isHosting && (
+                <div className="nav-tabs">
+                  <button
+                    className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('share')}
+                  >
+                    <span>📺</span> Share Screen
+                  </button>
+                  <button
+                    className={`tab-btn ${activeTab === 'join' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('join')}
+                  >
+                    <span>🔗</span> Join Remote Screen
+                  </button>
+                </div>
+              )}
 
-            {activeTab === 'share' || isHosting ? (
-              <HostCard
-                sources={sources}
-                selectedSourceId={selectedSourceId}
-                onSelectSource={(id) => setSelectedSourceId(id)}
-                onRefreshSources={() => loadDesktopSources()}
-                onStartSharing={handleStartSharing}
-                onStopSharing={handleStopSharing}
-                isHosting={isHosting}
-                isConnected={statusState === 'connected'}
-                sessionCode={sessionCode}
-                remainingSeconds={remainingSeconds}
-                isExpired={isExpired}
-              />
-            ) : (
-              <ViewerCard onJoinSession={handleJoinSession} />
-            )}
-          </div>
-        ) : (
-          <StreamView
-            remoteStream={remoteStream}
-            localStream={localStream}
-            onEndSession={() => handleEndSession()}
+              {activeTab === 'share' || isHosting ? (
+                <HostCard
+                  sources={sources}
+                  selectedSourceId={selectedSourceId}
+                  onSelectSource={(id) => setSelectedSourceId(id)}
+                  onRefreshSources={() => loadDesktopSources()}
+                  onStartSharing={handleStartSharing}
+                  onStopSharing={handleStopSharing}
+                  isHosting={isHosting}
+                  isConnected={statusState === 'connected'}
+                  sessionCode={sessionCode}
+                  remainingSeconds={remainingSeconds}
+                  isExpired={isExpired}
+                />
+              ) : (
+                <ViewerCard onJoinSession={handleJoinSession} />
+              )}
+            </div>
+          ) : (
+            <StreamView
+              remoteStream={remoteStream}
+              localStream={localStream}
+              onEndSession={() => handleEndSession()}
+              onSendMessage={handleSendMessage}
+              onSendFile={handleSendFile}
+              onSyncClipboard={handleSyncClipboard}
+            />
+          )}
+        </div>
+
+        {/* SIDEBAR FLEX PANEL - Rendered side-by-side on both Host & Viewer */}
+        {isSidePanelOpen && (
+          <SideDrawer
+            onSendMessage={handleSendMessage}
+            onSendFile={handleSendFile}
+            onSyncClipboard={handleSyncClipboard}
+            onClose={() => setIsSidePanelOpen(false)}
           />
         )}
       </div>
@@ -372,6 +565,12 @@ export const App: React.FC = () => {
         title={modalConfig.title}
         message={modalConfig.message}
         onClose={closeModal}
+      />
+
+      <ClipboardModal
+        isOpen={clipboardModalConfig.isOpen}
+        text={clipboardModalConfig.text}
+        onClose={closeClipboardModal}
       />
     </>
   );

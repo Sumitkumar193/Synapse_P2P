@@ -6,6 +6,9 @@ interface TitleBarProps {
   statusState: 'ready' | 'hosting' | 'connected' | 'expired';
   signalingMethod: SignalingMethod;
   signalingHealth: Record<string, boolean>;
+  chatBadgeCount?: number;
+  isChatOpen?: boolean;
+  onToggleChat?: () => void;
   onSignalingMethodChange: (method: SignalingMethod) => void;
   onOpen2ndWin: () => void;
 }
@@ -15,6 +18,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   statusState,
   signalingMethod,
   signalingHealth,
+  chatBadgeCount = 0,
+  isChatOpen = false,
+  onToggleChat,
   onSignalingMethodChange,
   onOpen2ndWin,
 }) => {
@@ -62,6 +68,21 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             🟢 Memory Safety Net — Active
           </option>
         </select>
+
+        {onToggleChat && (
+          <button
+            className="btn-new-win"
+            onClick={onToggleChat}
+            title="Toggle Chat & Shared Media Sidebar"
+            style={{
+              background: isChatOpen ? 'rgba(99, 102, 241, 0.4)' : 'rgba(99, 102, 241, 0.15)',
+              color: isChatOpen ? 'white' : '#818cf8',
+              borderColor: isChatOpen ? '#818cf8' : undefined,
+            }}
+          >
+            💬 Chat {chatBadgeCount > 0 ? `(${chatBadgeCount})` : ''}
+          </button>
+        )}
 
         <button
           className="btn-new-win"

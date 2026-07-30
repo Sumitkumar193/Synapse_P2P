@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, NativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, NativeImage, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
@@ -14,6 +14,20 @@ app.commandLine.appendSwitch('enable-features', 'GDIWindowCapturer');
 import { setupDesktopCapturerIPC } from './ipc/desktopCapturerHandler';
 import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
+
+ipcMain.handle('READ_CLIPBOARD', () => {
+  try {
+    return clipboard.readText();
+  } catch {
+    return '';
+  }
+});
+
+ipcMain.on('WRITE_CLIPBOARD', (_event, text: string) => {
+  try {
+    clipboard.writeText(text);
+  } catch {}
+});
 
 let windows: Set<BrowserWindow> = new Set();
 let tray: Tray | null = null;

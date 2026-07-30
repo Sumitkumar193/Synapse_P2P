@@ -10,6 +10,8 @@ declare global {
       maximizeWindow?: () => void;
       closeWindow?: () => void;
       openNewWindow?: () => void;
+      readClipboardText?: () => Promise<string>;
+      writeClipboardText?: (text: string) => void;
       isDev?: boolean;
       signaling?: {
         joinRoom: (roomId: string, peerId: string) => void;

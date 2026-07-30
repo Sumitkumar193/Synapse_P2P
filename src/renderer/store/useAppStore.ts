@@ -9,6 +9,29 @@ export interface ModalConfig {
   message: string;
 }
 
+export interface ClipboardModalConfig {
+  isOpen: boolean;
+  text: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'local' | 'remote';
+  kind: 'text' | 'file' | 'clipboard';
+  text?: string;
+  fileData?: {
+    name: string;
+    size: number;
+    url?: string;
+    progress?: number;
+    isIncoming: boolean;
+  };
+  clipboardData?: {
+    text: string;
+  };
+  timestamp: number;
+}
+
 export interface AppState {
   activeTab: 'share' | 'join';
   sources: DesktopSource[];
@@ -25,6 +48,12 @@ export interface AppState {
   remoteStream: MediaStream | null;
   localStream: MediaStream | null;
   modalConfig: ModalConfig;
+  clipboardModalConfig: ClipboardModalConfig;
+
+  // Real-time Chat & Media Panel State
+  isSidePanelOpen: boolean;
+  chatMessages: ChatMessage[];
+  clipboardText: string;
 
   // Actions
   setActiveTab: (tab: 'share' | 'join') => void;
@@ -43,7 +72,15 @@ export interface AppState {
   setLocalStream: (stream: MediaStream | null) => void;
   showNotice: (message: string, title?: string) => void;
   closeModal: () => void;
+  showClipboardModal: (text: string) => void;
+  closeClipboardModal: () => void;
   resetSessionState: () => void;
+
+  // Chat Actions
+  setIsSidePanelOpen: (open: boolean) => void;
+  addChatMessage: (msg: ChatMessage) => void;
+  updateFileMessageProgress: (id: string, progress: number) => void;
+  setClipboardText: (text: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -68,6 +105,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   remoteStream: null,
   localStream: null,
   modalConfig: { isOpen: false, title: 'Notice', message: '' },
+  clipboardModalConfig: { isOpen: false, text: '' },
+
+  isSidePanelOpen: false,
+  chatMessages: [],
+  clipboardText: '',
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setSources: (sources) => set({ sources }),
@@ -89,6 +131,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   showNotice: (message, title = 'Notice') =>
     set({ modalConfig: { isOpen: true, title, message } }),
   closeModal: () => set((state) => ({ modalConfig: { ...state.modalConfig, isOpen: false } })),
+  showClipboardModal: (text) => set({ clipboardModalConfig: { isOpen: true, text } }),
+  closeClipboardModal: () => set({ clipboardModalConfig: { isOpen: false, text: '' } }),
   resetSessionState: () =>
     set({
       isHosting: false,
@@ -98,5 +142,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       localStream: null,
       statusState: 'ready',
       statusText: 'Ready',
+      isSidePanelOpen: false,
+      chatMessages: [],
+      clipboardText: '',
+      clipboardModalConfig: { isOpen: false, text: '' },
     }),
+
+  setIsSidePanelOpen: (isSidePanelOpen) => set({ isSidePanelOpen }),
+  addChatMessage: (msg) => set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
+  updateFileMessageProgress: (id, progress) =>
+    set((state) => ({
+      chatMessages: state.chatMessages.map((msg) =>
+        msg.id === id && msg.fileData
+          ? { ...msg, fileData: { ...msg.fileData, progress } }
+          : msg
+      ),
+    })),
+  setClipboardText: (clipboardText) => set({ clipboardText }),
 }));

@@ -1,16 +1,28 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { useAppStore } from '../store/useAppStore';
 
 interface StreamViewProps {
   remoteStream: MediaStream | null;
   localStream: MediaStream | null;
   onEndSession: () => Promise<void>;
+  onSendMessage: (text: string) => void;
+  onSendFile: (file: File) => void;
+  onSyncClipboard: (text: string) => void;
 }
 
-export const StreamView: React.FC<StreamViewProps> = ({ remoteStream, localStream, onEndSession }) => {
+export const StreamView: React.FC<StreamViewProps> = ({
+  remoteStream,
+  localStream,
+  onEndSession,
+}) => {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  const isSidePanelOpen = useAppStore((state) => state.isSidePanelOpen);
+  const setIsSidePanelOpen = useAppStore((state) => state.setIsSidePanelOpen);
+  const chatMessages = useAppStore((state) => state.chatMessages);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -107,6 +119,12 @@ export const StreamView: React.FC<StreamViewProps> = ({ remoteStream, localStrea
       </div>
 
       <div className="control-bar">
+        <button
+          className={`ctrl-btn ${isSidePanelOpen ? 'active' : ''}`}
+          onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+        >
+          💬 Chat & Media {chatMessages.length > 0 ? `(${chatMessages.length})` : ''}
+        </button>
         <button className="ctrl-btn" onClick={toggleAudio}>
           {isAudioMuted ? '🔇 Unmute' : '🔊 Mute'}
         </button>
