@@ -251,6 +251,15 @@ export class P2PMediaSDK {
     };
   }
 
+  public getActiveSignalingProviderName(): string {
+    if (this.signalingProvider && typeof (this.signalingProvider as any).getActiveProviderName === 'function') {
+      return (this.signalingProvider as any).getActiveProviderName();
+    }
+    return 'Default Cascade';
+  }
+
+
+
   public async checkSignalingHealth(): Promise<Record<string, boolean>> {
     const health: Record<string, boolean> = {
       firebase: false,

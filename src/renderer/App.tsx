@@ -15,12 +15,26 @@ import { StreamView } from './components/StreamView';
 import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
 import { ClipboardModal } from './components/ClipboardModal';
+import { SettingsPanelComponent } from './components/SettingsPanel';
+import { SessionEventBridge } from '../shared/SessionEventBridge';
 import { SignalingMethod, ChatMessage, useAppStore } from './store/useAppStore';
+
 
 export const App: React.FC = () => {
   const sdkRef = useRef<P2PMediaSDK | null>(null);
   const timerRef = useRef<any>(null);
   const lastCopiedRef = useRef<string>('');
+  const settingsRef = useRef<SettingsPanelComponent | null>(null);
+
+  useEffect(() => {
+    const container = document.getElementById('settingsContainer');
+    if (container) {
+      const panel = new SettingsPanelComponent();
+      panel.mount(container);
+      settingsRef.current = panel;
+    }
+  }, []);
+
 
   // Zustand State Selectors
   const activeTab = useAppStore((state) => state.activeTab);
@@ -137,7 +151,13 @@ export const App: React.FC = () => {
         // Wire up Session Data, File Transfer & Clipboard listeners
         const currentSession = sdk.session();
         if (currentSession) {
+          if ((window as any).activeBridge) {
+            (window as any).activeBridge.destroy();
+          }
+          (window as any).activeBridge = new SessionEventBridge(currentSession);
+
           currentSession.data.onMessage((msg) => {
+
             try {
               const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
               if (data && data.type === 'app-chat' && data.text) {
@@ -494,9 +514,11 @@ export const App: React.FC = () => {
         chatBadgeCount={chatMessages.length}
         isChatOpen={isSidePanelOpen}
         onToggleChat={() => setIsSidePanelOpen(!isSidePanelOpen)}
+        onOpenSettings={() => settingsRef.current?.toggle()}
         onSignalingMethodChange={setSignalingMethod}
         onOpen2ndWin={handleOpen2ndWin}
       />
+
 
       <div className="app-body">
         <div className="app-main-content">
@@ -572,6 +594,9 @@ export const App: React.FC = () => {
         text={clipboardModalConfig.text}
         onClose={closeClipboardModal}
       />
+
+      <div id="settingsContainer"></div>
     </>
   );
+
 };

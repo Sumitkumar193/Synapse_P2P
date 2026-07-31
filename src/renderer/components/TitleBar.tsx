@@ -9,6 +9,7 @@ interface TitleBarProps {
   chatBadgeCount?: number;
   isChatOpen?: boolean;
   onToggleChat?: () => void;
+  onOpenSettings?: () => void;
   onSignalingMethodChange: (method: SignalingMethod) => void;
   onOpen2ndWin: () => void;
 }
@@ -16,24 +17,24 @@ interface TitleBarProps {
 export const TitleBar: React.FC<TitleBarProps> = ({
   statusText,
   statusState,
-  signalingMethod,
-  signalingHealth,
   chatBadgeCount = 0,
   isChatOpen = false,
   onToggleChat,
-  onSignalingMethodChange,
+  onOpenSettings,
   onOpen2ndWin,
 }) => {
   const handleMinimize = () => window.electronAPI?.minimizeWindow?.();
   const handleMaximize = () => window.electronAPI?.maximizeWindow?.();
   const handleClose = () => window.electronAPI?.closeWindow?.();
 
-  const getPrimaryCascadeName = () => {
-    if (signalingHealth.firebase) return '🟢 Firebase';
-    if (signalingHealth.websocket) return '🟢 WebSocket';
-    if (signalingHealth.webtorrent) return '🟢 WebTorrent';
-    return '🟢 Memory';
+  const handleOpenSettings = () => {
+    if (onOpenSettings) {
+      onOpenSettings();
+    } else if ((window as any).settingsComponentInstance) {
+      (window as any).settingsComponentInstance.toggle();
+    }
   };
+
 
   return (
     <header>
@@ -43,37 +44,16 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       </div>
 
       <div className="header-right">
-        <select
-          className="signaling-select"
-          value={signalingMethod}
-          onChange={(e) => onSignalingMethodChange(e.target.value as SignalingMethod)}
-          title="Select P2P Signaling Provider Method"
-        >
-          <option value="auto">
-            ⚡ Auto Cascade ({getPrimaryCascadeName()})
-          </option>
-          <option value="firebase">
-            {signalingHealth.firebase ? '🟢' : '🔴'} Firebase Realtime DB (HTTPS 443) — {signalingHealth.firebase ? 'Active' : 'Offline'}
-          </option>
-          <option value="websocket">
-            {signalingHealth.websocket ? '🟢' : '🔴'} WebSocket Server (WSS 443) — {signalingHealth.websocket ? 'Active' : 'Offline'}
-          </option>
-          <option value="webtorrent">
-            {signalingHealth.webtorrent ? '🟢' : '🔴'} WebTorrent Trackers {signalingHealth.activeTrackerUrl ? `(${String(signalingHealth.activeTrackerUrl).replace('wss://', '')})` : ''} — {signalingHealth.webtorrent ? 'Active' : 'Offline'}
-          </option>
-          <option value="ipc">
-            {signalingHealth.ipc ? '🟢' : '⚪'} Electron IPC (Local) — {signalingHealth.ipc ? 'Active' : 'N/A'}
-          </option>
-          <option value="memory">
-            🟢 Memory Safety Net — Active
-          </option>
-        </select>
+        <div className={`status-badge ${statusState}`}>
+          <div className={`status-dot ${statusState}`}></div>
+          <span>{statusText}</span>
+        </div>
 
         {onToggleChat && (
           <button
             className="btn-new-win"
             onClick={onToggleChat}
-            title="Toggle Chat & Shared Media Sidebar"
+            title="Toggle Chat & AI Copilot Sidebar"
             style={{
               background: isChatOpen ? 'rgba(99, 102, 241, 0.4)' : 'rgba(99, 102, 241, 0.15)',
               color: isChatOpen ? 'white' : '#818cf8',
@@ -84,6 +64,23 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           </button>
         )}
 
+        {/* Dedicated Settings Button */}
+        <button
+          className="btn-new-win"
+          onClick={handleOpenSettings}
+          title="Open Preferences & Settings Modal"
+          style={{
+            background: 'rgba(255, 255, 255, 0.1)',
+            color: '#f8fafc',
+            borderColor: 'rgba(255, 255, 255, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          ⚙️ Settings
+        </button>
+
         <button
           className="btn-new-win"
           onClick={onOpen2ndWin}
@@ -91,11 +88,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         >
           ➕ 2nd Window
         </button>
-
-        <div className={`status-badge ${statusState}`}>
-          <div className={`status-dot ${statusState}`}></div>
-          <span>{statusText}</span>
-        </div>
 
         <div className="window-controls">
           <button className="win-btn" onClick={handleMinimize} title="Minimize">&#8722;</button>

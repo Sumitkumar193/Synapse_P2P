@@ -14,6 +14,14 @@ app.commandLine.appendSwitch('enable-features', 'GDIWindowCapturer');
 import { setupDesktopCapturerIPC } from './ipc/desktopCapturerHandler';
 import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
+import { AudioWorkerController } from '../workers/audioWorker';
+import { setupIPCProxyHandlers } from './ipcProxy';
+import { setupSettingsIPC } from './settingsManager';
+
+
+let audioWorkerInstance: AudioWorkerController | null = null;
+let realtimeBusInfo: { port: number; token: string } | null = null;
+
 
 ipcMain.handle('READ_CLIPBOARD', () => {
   try {
@@ -28,6 +36,11 @@ ipcMain.on('WRITE_CLIPBOARD', (_event, text: string) => {
     clipboard.writeText(text);
   } catch {}
 });
+
+ipcMain.handle('GET_REALTIME_BUS_INFO', () => {
+  return realtimeBusInfo;
+});
+
 
 let windows: Set<BrowserWindow> = new Set();
 let tray: Tray | null = null;
@@ -160,13 +173,26 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupDesktopCapturerIPC();
   setupSignalingIPC();
+  setupIPCProxyHandlers();
+  setupSettingsIPC();
   setupWindowIPC(
     () => BrowserWindow.getFocusedWindow() || (windows.size > 0 ? Array.from(windows)[0] : null),
     () => createWindow()
   );
+
+
+
+  // Initialize Realtime Bus & Audio Worker
+  try {
+    audioWorkerInstance = new AudioWorkerController();
+    realtimeBusInfo = await audioWorkerInstance.initialize(0);
+    console.log(`[Main Process] 🟢 Realtime Bus listening on 127.0.0.1:${realtimeBusInfo.port} (Token: ${realtimeBusInfo.token.substring(0, 8)}...)`);
+  } catch (err) {
+    console.error('[Main Process] Failed to initialize Realtime Bus:', err);
+  }
 
   setupTray();
   createWindow();
@@ -177,6 +203,7 @@ app.whenReady().then(() => {
     }
   });
 });
+
 
 app.on('before-quit', () => {
   isQuitting = true;

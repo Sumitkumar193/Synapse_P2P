@@ -132,29 +132,19 @@ export class MediaManager implements IMediaProvider {
     try {
       const constraints: MediaStreamConstraints = {
         audio: {
-          echoCancellation: { exact: true },
-          noiseSuppression: { exact: true },
-          autoGainControl: { exact: true },
-          deviceId: options.deviceId ? { exact: options.deviceId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+          deviceId: options.deviceId ? { ideal: options.deviceId } : undefined,
         } as any,
         video: false,
       };
 
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (e) {
-        // Fallback ideal echo cancellation
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video: false,
-        });
-      }
-
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const audioTrack = stream.getAudioTracks()[0];
       if (!audioTrack) {
         throw new MediaError('No audio track returned by getUserMedia');
@@ -173,14 +163,27 @@ export class MediaManager implements IMediaProvider {
     const audioCtx = new AudioContextClass();
     const destination = audioCtx.createMediaStreamDestination();
 
+    // Dynamics Compressor to eliminate audio gain explosion & feedback howling
+    const compressor = audioCtx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 30;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+    compressor.connect(destination);
+
     tracks.forEach((track) => {
       const stream = new MediaStream([track]);
       const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(destination);
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0.7; // Limit gain to prevent audio loop feedback
+      source.connect(gainNode);
+      gainNode.connect(compressor);
     });
 
     return destination.stream.getAudioTracks()[0];
   }
+
 
   public stopLocalStream(): void {
     if (this.activeLocalStream) {
