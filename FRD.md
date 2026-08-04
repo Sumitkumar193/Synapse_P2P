@@ -63,11 +63,13 @@ The **Live AI Interview Copilot & P2P Media Platform** transforms real-time scre
 * **FR-2.2**: Embedded `RealtimeBus` WebSocket/HTTP server listening exclusively on loopback interface (`127.0.0.1`) with session token authentication.
 * **FR-2.3**: `AudioWorkerController` tapping 16kHz 16-bit mono PCM audio frames and streaming them to the RingBuffer.
 
-### FR-3: Speech-to-Text (STT) Engine & Transcript Stabilization (`src/agent/transcription`)
+### FR-3: Speech-to-Text (STT) Engine & Transcript Stabilization (`src/agent/transcription`, `src/renderer/utils`)
 * **FR-3.1**: Local native `whisper.cpp` STT execution using bundled `whisper-cli.exe` and `ggml-tiny.en.bin` model files (~2ms execution time per chunk).
 * **FR-3.2**: Cloud `OpenAIAudioTranscriptionProvider` REST API calling `https://api.openai.com/v1/audio/transcriptions`.
 * **FR-3.3**: `LocalAgreement-n` filter emitting unconfirmed `transcript.partial` immediately and confirmed `transcript.final` when consecutive segments match.
 * **FR-3.4**: Dynamic `createTranscriptionProvider()` factory resolving configuration from `SettingsManager`.
+* **FR-3.5**: WebAudio `AudioStreamer` capturing 16kHz 16-bit mono PCM audio chunks from microphone or speaker media tracks and dispatching via `sendAudioChunk` IPC.
+* **FR-3.6**: Main process IPC listener (`AUDIO_CHUNK`) routing audio buffers into `AudioWorkerController` and broadcasting Whisper transcripts back to renderer windows (`TRANSCRIPT_EVENT`).
 
 ### FR-4: Decoupled LLM Architecture & Workflow Engine (`src/agent/ai`, `src/workflow`)
 * **FR-4.1**: Decoupled `ILLMProvider` engine supporting `OpenAIProvider` (GPT), `OllamaProvider` (`http://localhost:11434`), and `ClaudeCLIProvider` (System CLI subprocess).
@@ -90,14 +92,16 @@ The **Live AI Interview Copilot & P2P Media Platform** transforms real-time scre
 
 ### FR-8: User Interface, Settings Panel & Navbar Menu (`src/renderer`)
 * **FR-8.1**: `ChatStreamComponent` rendering AI Copilot responses, live transcripts, and inline tool approval prompt cards (`[Approve]` / `[Dismiss]`).
-* **FR-8.2**: Glassmorphic modal `SettingsPanelComponent` allowing dynamic setting of STT providers, LLM engines, API keys, thread counts, and MCP servers without hardcoded environment variables.
+* **FR-8.2**: Glassmorphic modal `SettingsPanelComponent` allowing dynamic setting of STT providers, LLM engines, API keys, thread counts, auto-open chat drawer, and MCP servers without hardcoded environment variables.
 * **FR-8.3**: Streamlined **Navbar Dropdown Menu (`⚙️ Menu ▾`)** in `TitleBar.tsx` providing clean access to preferences, signaling selection, 2nd window launcher, and exit options.
 * **FR-8.4**: Persistent settings storage (`app_preferences.json`) in Electron `userData` directory.
+* **FR-8.5**: `SideDrawer` side panel supporting real-time chat, subtitle toggles, auto-opening on new transcript events (`autoOpenChatPanel`), and responsive dual-sharing layout options.
 
 ### FR-9: Live Closed Caption (CC) Streaming & Unified Event Bridge (`src/shared`)
 * **FR-9.1**: `SessionEventBridge` automatically subscribing to `transcript.partial` and `transcript.final` events on `EventBus` and streaming live subtitles over WebRTC DataChannel (`closed_caption`) to connected joiners without code duplication (DRY principle).
 * **FR-9.2**: `ClosedCaptionOverlay` rendering real-time, glassmorphic closed caption subtitle overlays on top of the live video viewport (`StreamView`).
 * **FR-9.3**: P2P DataChannel MCP RPC bridge allowing remote joiners to invoke authorized MCP tools transparently.
+* **FR-9.4**: Automatic closed-caption chat synchronization emitting `cc.chat.local` and `cc.chat.remote` events to display speaker dialogue directly inside the unified chat drawer.
 
 ---
 

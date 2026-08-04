@@ -21,10 +21,13 @@ A production-grade, frameless **Electron P2P Screen Sharing Application, Media S
 ---
 
 ### 🤖 Live AI Copilot & Workflow Engine Architecture
-* **🎙️ Speech-To-Text (Whisper) Engine**:
+* **🎙️ Speech-To-Text (Whisper) Engine & Audio Streamer**:
+  * **WebAudio PCM Streamer (`AudioStreamer.ts`)**: Real-time 16kHz Int16 mono PCM audio capture from local microphone or remote WebRTC audio streams using WebAudio `AudioContext`.
+  * **Electron IPC Audio & Transcript Relay**: Direct IPC pipeline (`sendAudioChunk` / `onTranscript`) streaming PCM audio chunks to main process `AudioWorkerController` and broadcasting `transcript.partial` / `transcript.final` back to all active windows.
   * **Local STT**: Native C++ `whisper-cli.exe` integration running bundled `ggml-tiny.en.bin` model files (~2ms inference execution time).
   * **Cloud STT**: OpenAI Cloud Audio Whisper API integration.
   * **LocalAgreement-n Filter**: Real-time transcript stabilization filter emitting instant `transcript.partial` and verified `transcript.final` events.
+  * **💬 Live Closed Caption (CC) Chat Sync**: Automatically formats final speech transcripts into live chat entries (`🎙️ [CC - Me]` / `🎙️ [CC - Received]`) in `SessionEventBridge`.
 * **🧠 Decoupled LLM Engine (`ILLMProvider`)**:
   * **OpenAI REST API** (`gpt-4o-mini`, `gpt-4o`).
   * **Ollama Local LLM** (`http://localhost:11434` — `llama3.2`, `mistral`).
@@ -41,7 +44,7 @@ A production-grade, frameless **Electron P2P Screen Sharing Application, Media S
   * Capability-Scoped API Bridge (`api.registerTool`, `api.onEvent`, `api.emitEvent`, `api.log`).
 * **⚙️ Dynamic Settings Panel & Preferences Store**:
   * Persistent storage (`app_preferences.json`) in Electron `userData` directory.
-  * Glassmorphism Settings modal UI for configuring STT models, LLM providers, API keys, CPU threads, and MCP servers without hardcoded environment variables.
+  * Glassmorphism Settings modal UI for configuring STT models, LLM providers, API keys, CPU threads, auto-opening chat panels, dual sharing join panels, and MCP servers without hardcoded environment variables.
   * Streamlined **Navbar Dropdown Menu (`⚙️ Menu ▾`)** in top titlebar.
 
 ---
@@ -116,6 +119,7 @@ npm test
 ScreenShareApp/
 ├── assets/                         # Application Icon & Native Whisper Binary assets
 │   ├── icon.jpg                    # Custom 3D P2P App Icon
+│   ├── sample/                     # Sample audio files (spoken_sample.wav, Sulafat.mp3, Umbriel.mp3)
 │   └── whisper/                    # Native whisper-cli.exe & ggml-tiny.en.bin model
 ├── FRD.md                          # Functional Requirements Document
 ├── release/                        # Packaged Standalone Portable Output
@@ -140,21 +144,25 @@ ScreenShareApp/
 │   ├── shared/                     # Shared Foundations
 │   │   ├── Container.ts            # Lightweight DI Service Container
 │   │   ├── EventBus.ts             # Strongly-typed Pub/Sub Event Bus
+│   │   ├── SessionEventBridge.ts   # P2P DataChannel closed caption & MCP RPC bridge
 │   │   ├── settings.ts             # AppSettings Schema & Default Preferences
 │   │   └── tools.ts                # 12 MCP Tool Definitions & Zod Schemas
 │   ├── workers/                    # Worker Controllers
 │   │   ├── agentWorker.ts          # AgentWorkerController (LLM + Workflow Engine)
 │   │   └── audioWorker.ts          # AudioWorkerController (PCM Audio Pipeline)
 │   ├── preload/
-│   │   └── index.ts                # ContextBridge IPC APIs (getSettings, saveSettings)
+│   │   └── index.ts                # ContextBridge IPC APIs (getSettings, saveSettings, sendAudioChunk, onTranscript)
 │   ├── renderer/                   # Front-End UI (React 18 + Zustand)
 │   │   ├── index.html              # Glassmorphic layout & responsive CSS styling
 │   │   ├── index.tsx               # React 18 DOM mount script
 │   │   ├── App.tsx                 # Root React container & SDK event handling
+│   │   ├── utils/                  # Front-End Utilities
+│   │   │   └── AudioStreamer.ts    # WebAudio 16kHz PCM audio stream recorder
 │   │   └── components/             # UI Components
 │   │       ├── TitleBar.tsx        # TitleBar with clean Navbar Dropdown Menu (⚙️ Menu ▾)
 │   │       ├── ChatStream.ts       # Glassmorphic Chat Bar & Inline Approval Prompt Cards
 │   │       ├── SettingsPanel.ts    # Preferences & AI Settings Modal Component
+│   │       ├── SideDrawer.tsx      # Unified Chat & Closed Caption Drawer Panel
 │   │       ├── HostCard.tsx        # Screen share setup & session code display
 │   │       └── StreamView.tsx      # WebRTC stream viewport & control bar
 │   └── sdk/                        # Core P2P Media SDK
