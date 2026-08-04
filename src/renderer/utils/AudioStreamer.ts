@@ -8,8 +8,8 @@ import { eventBus } from '../../shared/EventBus';
 export class AudioStreamer {
   private audioCtx: AudioContext | null = null;
   private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
-  private processor: ScriptProcessorNode | null = null;
-  private pcmBuffer: number[] = [];
+  private workletNode: AudioWorkletNode | null = null;
+  private silentGain: GainNode | null = null;
   private static transcriptListenerAttached = false;
 
   public async start(stream: MediaStream, speaker: 'local' | 'remote' = 'local'): Promise<void> {
@@ -27,53 +27,104 @@ export class AudioStreamer {
         AudioStreamer.attachTranscriptListener();
       }
 
-      const audioStream = new MediaStream([audioTracks[0]]);
-      this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      if (this.audioCtx.state === 'suspended') {
-        await this.audioCtx.resume();
+      // Initialize AudioContext ONCE if not created yet (use native hardware sample rate to prevent Windows audio driver failure)
+      if (!this.audioCtx) {
+        this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
 
-      this.mediaStreamSource = this.audioCtx.createMediaStreamSource(audioStream);
-      this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
-
-      if (speaker === 'local') {
-        // LOCAL MIC: Route processor to SILENT gain node (gain=0) to eliminate self-monitoring echo
-        const silentGain = this.audioCtx.createGain();
-        silentGain.gain.value = 0;
-        this.processor.connect(silentGain);
-        silentGain.connect(this.audioCtx.destination);
-      } else {
-        // REMOTE SPEAKER: Connect to destination so user CAN hear remote peer speaker audio normally
-        this.processor.connect(this.audioCtx.destination);
+      // Disconnect previous MediaStreamSource if present to avoid ghost track listening
+      if (this.mediaStreamSource) {
+        try {
+          this.mediaStreamSource.disconnect();
+        } catch {}
+        this.mediaStreamSource = null;
       }
 
-      this.processor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        // Convert Float32 → Int16 PCM
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]));
-          this.pcmBuffer.push(s < 0 ? s * 0x8000 : s * 0x7FFF);
-        }
+      // Create new MediaStreamSource for the passed MediaStream (mixes all mic & system speaker tracks)
+      this.mediaStreamSource = this.audioCtx.createMediaStreamSource(stream);
 
-        // Batch into 0.25s buffers (4,096 samples = 256ms at 16kHz) for ultra-fast low-latency streaming over IPC
-        if (this.pcmBuffer.length >= 4096) {
-          const samplesToSend = this.pcmBuffer.splice(0, 4096);
+      // Modern AudioWorklet Node (runs off main thread in real-time audio thread)
+      if (this.audioCtx.audioWorklet) {
+        if (!this.workletNode) {
+          const workletCode = `
+            class PcmProcessor extends AudioWorkletProcessor {
+              constructor() {
+                super();
+                this.ringBuffer = new Int16Array(4096);
+                this.writeIdx = 0;
+                this.step = Math.max(1, sampleRate / 16000);
+              }
+              process(inputs) {
+                const input = inputs[0];
+                if (input && input.length > 0) {
+                  const channelData = input[0];
+                  const stepSize = Math.max(1, Math.round(this.step));
+                  for (let i = 0; i < channelData.length; i += this.step) {
+                    let sum = 0;
+                    let count = 0;
+                    const startIdx = Math.floor(i);
+                    const endIdx = Math.min(channelData.length, startIdx + stepSize);
+                    for (let j = startIdx; j < endIdx; j++) {
+                      sum += channelData[j];
+                      count++;
+                    }
+                    const avgSample = count > 0 ? sum / count : (channelData[startIdx] || 0);
+                    const s = Math.max(-1, Math.min(1, avgSample));
+                    this.ringBuffer[this.writeIdx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
 
-          const int16Array = new Int16Array(samplesToSend);
-          if (typeof window !== 'undefined' && (window as any).electronAPI?.sendAudioChunk) {
-            (window as any).electronAPI.sendAudioChunk(int16Array.buffer, speaker);
+                    if (this.writeIdx >= 4096) {
+                      this.port.postMessage(this.ringBuffer.buffer, [this.ringBuffer.buffer]);
+                      this.ringBuffer = new Int16Array(4096);
+                      this.writeIdx = 0;
+                    }
+                  }
+                }
+                return true;
+              }
+            }
+            registerProcessor('pcm-processor', PcmProcessor);
+          `;
+
+          const blob = new Blob([workletCode], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(blob);
+          await this.audioCtx.audioWorklet.addModule(workletUrl);
+          URL.revokeObjectURL(workletUrl);
+
+          this.workletNode = new AudioWorkletNode(this.audioCtx, 'pcm-processor');
+          this.workletNode.port.onmessage = (e) => {
+            const pcmArrayBuffer = e.data;
+            if (typeof window !== 'undefined' && (window as any).electronAPI?.sendAudioChunk) {
+              (window as any).electronAPI.sendAudioChunk(pcmArrayBuffer, speaker);
+            }
+          };
+
+          if (speaker === 'local') {
+            if (!this.silentGain) {
+              this.silentGain = this.audioCtx.createGain();
+              this.silentGain.gain.value = 0;
+              this.silentGain.connect(this.audioCtx.destination);
+            }
+            this.workletNode.connect(this.silentGain);
+          } else {
+            this.workletNode.connect(this.audioCtx.destination);
           }
         }
-      };
 
-      this.mediaStreamSource.connect(this.processor);
-
-      console.log(`[AudioStreamer] 🎙️ ${speaker.toUpperCase()} audio capture started (resumed) → 16kHz PCM → IPC → Whisper STT`);
+        this.mediaStreamSource.connect(this.workletNode);
+        if (this.audioCtx.state === 'suspended') {
+          await this.audioCtx.resume();
+        }
+        console.log(`[AudioStreamer] 🎙️ ${speaker.toUpperCase()} AudioWorklet connected (Hardware SR: ${this.audioCtx.sampleRate}Hz) → 16kHz PCM → IPC → Whisper STT`);
+        return;
+      }
 
     } catch (err) {
       console.warn(`[AudioStreamer] Failed to initialize ${speaker} audio streamer:`, err);
     }
   }
+
+  private static lastPartialEmitTime = 0;
+  private static partialDebounceTimer: any = null;
 
   /**
    * Global IPC transcript listener receiving Whisper STT events from main process
@@ -86,7 +137,12 @@ export class AudioStreamer {
       const speaker = evt.speaker || 'local';
 
       if (evt.isFinal) {
-        // Emit final transcript for Closed Caption overlay & EventBus consumers
+        if (AudioStreamer.partialDebounceTimer) {
+          clearTimeout(AudioStreamer.partialDebounceTimer);
+          AudioStreamer.partialDebounceTimer = null;
+        }
+
+        // Emit final transcript immediately for Closed Caption overlay & EventBus consumers
         eventBus.emit('transcript.final', {
           text: evt.text,
           speaker,
@@ -109,12 +165,27 @@ export class AudioStreamer {
         }
         console.log(`[AudioStreamer] ✅ Whisper Final (${speaker}): "${evt.text}"`);
       } else {
-        // Emit partial transcript for live preview
-        eventBus.emit('transcript.partial', {
-          text: evt.text,
-          speaker,
-          timestamp,
-        });
+        const now = Date.now();
+        const payload = { text: evt.text, speaker, timestamp };
+
+        if (now - AudioStreamer.lastPartialEmitTime >= 100) {
+          AudioStreamer.lastPartialEmitTime = now;
+          if (AudioStreamer.partialDebounceTimer) {
+            clearTimeout(AudioStreamer.partialDebounceTimer);
+            AudioStreamer.partialDebounceTimer = null;
+          }
+          eventBus.emit('transcript.partial', payload);
+        } else {
+          // Trailing-edge debounce: Guarantee the latest partial is ALWAYS delivered before a pause!
+          if (AudioStreamer.partialDebounceTimer) {
+            clearTimeout(AudioStreamer.partialDebounceTimer);
+          }
+          AudioStreamer.partialDebounceTimer = setTimeout(() => {
+            AudioStreamer.lastPartialEmitTime = Date.now();
+            AudioStreamer.partialDebounceTimer = null;
+            eventBus.emit('transcript.partial', payload);
+          }, 100 - (now - AudioStreamer.lastPartialEmitTime));
+        }
       }
     });
 
@@ -125,19 +196,34 @@ export class AudioStreamer {
   }
 
   public stop(): void {
-    if (this.processor) {
-      this.processor.disconnect();
-      this.processor = null;
+    if (this.audioCtx && this.audioCtx.state === 'running') {
+      this.audioCtx.suspend().catch(() => {});
+    }
+  }
+
+  public destroy(): void {
+    this.stop();
+    if (this.workletNode) {
+      try {
+        this.workletNode.port.onmessage = null;
+        this.workletNode.disconnect();
+      } catch {}
+      this.workletNode = null;
     }
     if (this.mediaStreamSource) {
       this.mediaStreamSource.disconnect();
       this.mediaStreamSource = null;
     }
+    if (this.silentGain) {
+      try {
+        this.silentGain.disconnect();
+      } catch {}
+      this.silentGain = null;
+    }
     if (this.audioCtx) {
       this.audioCtx.close().catch(() => {});
       this.audioCtx = null;
     }
-    this.pcmBuffer = [];
   }
 }
 

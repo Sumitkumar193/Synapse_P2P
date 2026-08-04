@@ -6,6 +6,13 @@ import * as dotenv from 'dotenv';
 // Load environment variables from .env
 dotenv.config();
 
+// Single Instance Lock: Ensure only 1 instance of the application runs at any time
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  console.log('[Main Process] ⛔ Another instance of P2P Screen Share is already running. Exiting secondary process...');
+  app.quit();
+}
+
 // Suppress Chromium internal C++ log noise (WGC static frame timeouts)
 app.commandLine.appendSwitch('log-level', '3');
 app.commandLine.appendSwitch('disable-features', 'WGCWindowCapturer,WGCDisplayCapturer,WgcCapturer');
@@ -17,7 +24,6 @@ import { setupSignalingIPC } from './ipc/signalingHandler';
 import { AudioWorkerController } from '../workers/audioWorker';
 import { setupIPCProxyHandlers } from './ipcProxy';
 import { setupSettingsIPC } from './settingsManager';
-
 
 let audioWorkerInstance: AudioWorkerController | null = null;
 let realtimeBusInfo: { port: number; token: string } | null = null;
@@ -230,6 +236,17 @@ app.whenReady().then(async () => {
 
   setupTray();
   createWindow();
+
+  app.on('second-instance', () => {
+    // Focus main window if user attempts to launch second instance
+    windows.forEach((win) => {
+      if (!win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      }
+    });
+  });
 
   app.on('activate', () => {
     if (windows.size === 0) {

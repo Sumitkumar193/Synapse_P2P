@@ -108,7 +108,13 @@ export interface AppState {
   transcripts: TranscriptParagraph[];
   clipboardText: string;
 
+  // App Configuration & Standalone AI Helper
+  enableHosting: boolean;
+  isAiHelperActive: boolean;
+
   // Actions
+  setEnableHosting: (enableHosting: boolean) => void;
+  setIsAiHelperActive: (isAiHelperActive: boolean) => void;
   setActiveTab: (tab: 'share' | 'join') => void;
   setSources: (sources: DesktopSource[]) => void;
   setSelectedSourceId: (id: string) => void;
@@ -164,13 +170,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   modalConfig: { isOpen: false, title: 'Notice', message: '' },
   clipboardModalConfig: { isOpen: false, text: '' },
 
-  isSidePanelOpen: true,
+  isSidePanelOpen: false,
   chatMessages: [],
   transcripts: [],
   clipboardText: '',
 
+  enableHosting: typeof window !== 'undefined' && localStorage.getItem('app_enable_hosting') !== null
+    ? localStorage.getItem('app_enable_hosting') === 'true'
+    : true,
+  isAiHelperActive: false,
 
-
+  setEnableHosting: (enableHosting) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('app_enable_hosting', String(enableHosting));
+    }
+    set({ enableHosting });
+  },
+  setIsAiHelperActive: (isAiHelperActive) => set({ isAiHelperActive }),
   setActiveTab: (activeTab) => set({ activeTab }),
   setSources: (sources) => set({ sources }),
   setSelectedSourceId: (selectedSourceId) => set({ selectedSourceId }),
@@ -214,7 +230,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const list = [...state.transcripts];
       const newText = p.text ? p.text.trim() : '';
-      if (!newText) return state;
+      if (!newText || newText.includes('🎙️') || newText.includes('Speaking...')) return state;
 
       // Find existing paragraph for this speaker
       const existingIdx = list.findIndex((item) => item.speaker === p.speaker);

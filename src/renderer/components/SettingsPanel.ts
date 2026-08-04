@@ -1,5 +1,6 @@
 import { AppSettings, DEFAULT_APP_SETTINGS, AppThemeMode } from '../../shared/settings';
 import { themeManager } from '../utils/themeManager';
+import { useAppStore } from '../store/useAppStore';
 
 export type SettingsTabId =
   | 'general'
@@ -33,6 +34,7 @@ export class SettingsPanelComponent {
     if (tab) this.activeTab = tab;
     this.isVisible = true;
     this.render();
+    this.loadCurrentSettings().then(() => this.render());
   }
 
   public hide(): void {
@@ -85,6 +87,9 @@ export class SettingsPanelComponent {
         const res = await (window as any).electronAPI.getSettings();
         if (res) {
           this.settings = res;
+          if (res.enableHosting !== undefined) {
+            useAppStore.getState().setEnableHosting(res.enableHosting);
+          }
           themeManager.applyTheme(this.settings.appTheme || 'dark-glass');
         }
       } catch {}
@@ -94,7 +99,7 @@ export class SettingsPanelComponent {
   public async saveSettings(): Promise<void> {
     if (!this.containerEl) return;
 
-    // Read active form inputs
+    // Read active form inputs safely (only override if element exists in active DOM tab)
     const userName = (this.containerEl.querySelector('#settingUserName') as HTMLInputElement)?.value || this.settings.userName;
     const userRole = (this.containerEl.querySelector('#settingUserRole') as HTMLSelectElement)?.value || this.settings.userRole;
     const appTheme = (this.containerEl.querySelector('#settingAppTheme') as HTMLSelectElement)?.value as AppThemeMode || this.settings.appTheme || 'dark-glass';
@@ -102,8 +107,10 @@ export class SettingsPanelComponent {
 
     const whisperProvider = (this.containerEl.querySelector('#settingWhisperProvider') as HTMLSelectElement)?.value as any || this.settings.whisperProvider;
     const localWhisperModel = (this.containerEl.querySelector('#settingWhisperModel') as HTMLSelectElement)?.value as any || this.settings.localWhisperModel;
-    const whisperThreads = parseInt((this.containerEl.querySelector('#settingWhisperThreads') as HTMLInputElement)?.value || '4', 10);
-    const openAiApiKey = (this.containerEl.querySelector('#settingOpenAiKey') as HTMLInputElement)?.value ?? this.settings.openAiApiKey;
+    const whisperThreadsEl = this.containerEl.querySelector('#settingWhisperThreads') as HTMLInputElement | null;
+    const whisperThreads = whisperThreadsEl ? parseInt(whisperThreadsEl.value || '4', 10) : this.settings.whisperThreads;
+    const openAiApiKeyEl = this.containerEl.querySelector('#settingOpenAiKey') as HTMLInputElement | null;
+    const openAiApiKey = openAiApiKeyEl ? openAiApiKeyEl.value : this.settings.openAiApiKey;
 
     const llmProvider = (this.containerEl.querySelector('#settingLlmProvider') as HTMLSelectElement)?.value as any || this.settings.llmProvider;
     const openAiModel = (this.containerEl.querySelector('#settingOpenAiModel') as HTMLInputElement)?.value || this.settings.openAiModel;
@@ -111,10 +118,20 @@ export class SettingsPanelComponent {
     const ollamaModel = (this.containerEl.querySelector('#settingOllamaModel') as HTMLInputElement)?.value || this.settings.ollamaModel;
     const systemPromptInstructions = (this.containerEl.querySelector('#settingSystemPrompt') as HTMLTextAreaElement)?.value || this.settings.systemPromptInstructions;
 
-    const autoCaptureOnQuestion = (this.containerEl.querySelector('#settingAutoCapture') as HTMLInputElement)?.checked ?? this.settings.autoCaptureOnQuestion;
-    const requireApprovalForOsTools = (this.containerEl.querySelector('#settingRequireApproval') as HTMLInputElement)?.checked ?? this.settings.requireApprovalForOsTools;
-    const autoOpenChatPanel = (this.containerEl.querySelector('#settingAutoOpenChat') as HTMLInputElement)?.checked ?? this.settings.autoOpenChatPanel ?? true;
-    const enableDualSharingJoinPanels = (this.containerEl.querySelector('#settingDualPanels') as HTMLInputElement)?.checked ?? this.settings.enableDualSharingJoinPanels ?? true;
+    const enableHostingEl = this.containerEl.querySelector('#settingEnableHosting') as HTMLInputElement | null;
+    const enableHosting = enableHostingEl ? enableHostingEl.checked : (this.settings.enableHosting ?? true);
+
+    const autoCaptureEl = this.containerEl.querySelector('#settingAutoCapture') as HTMLInputElement | null;
+    const autoCaptureOnQuestion = autoCaptureEl ? autoCaptureEl.checked : (this.settings.autoCaptureOnQuestion ?? true);
+
+    const requireApprovalEl = this.containerEl.querySelector('#settingRequireApproval') as HTMLInputElement | null;
+    const requireApprovalForOsTools = requireApprovalEl ? requireApprovalEl.checked : (this.settings.requireApprovalForOsTools ?? true);
+
+    const autoOpenChatEl = this.containerEl.querySelector('#settingAutoOpenChat') as HTMLInputElement | null;
+    const autoOpenChatPanel = autoOpenChatEl ? autoOpenChatEl.checked : (this.settings.autoOpenChatPanel ?? true);
+
+    const enableDualPanelsEl = this.containerEl.querySelector('#settingDualPanels') as HTMLInputElement | null;
+    const enableDualSharingJoinPanels = enableDualPanelsEl ? enableDualPanelsEl.checked : (this.settings.enableDualSharingJoinPanels ?? true);
 
     this.settings = {
       ...this.settings,
@@ -131,11 +148,14 @@ export class SettingsPanelComponent {
       ollamaBaseUrl,
       ollamaModel,
       systemPromptInstructions,
+      enableHosting,
       autoCaptureOnQuestion,
       requireApprovalForOsTools,
       autoOpenChatPanel,
       enableDualSharingJoinPanels,
     };
+
+    useAppStore.getState().setEnableHosting(enableHosting);
 
 
     themeManager.applyTheme(appTheme);
@@ -369,6 +389,14 @@ export class SettingsPanelComponent {
           
           <div class="form-group-card-dark">
             <div class="checkbox-row-dark">
+              <input type="checkbox" id="settingEnableHosting" ${this.settings.enableHosting !== false ? 'checked' : ''} onchange="window.settingsComponentInstance?.handleSettingChange('enableHosting', this.checked)" />
+              <div>
+                <strong>Enable Screen Share Hosting / Streaming</strong>
+                <p class="field-hint-dark">Allows your device to host screen sharing sessions. If disabled, hosting card is hidden and app defaults to Join & AI Helper mode.</p>
+              </div>
+            </div>
+
+            <div class="checkbox-row-dark">
               <input type="checkbox" id="settingAutoOpenChat" ${this.settings.autoOpenChatPanel !== false ? 'checked' : ''} />
               <div>
                 <strong>Auto-enable Side Chat & AI Copilot Drawer</strong>
@@ -561,6 +589,16 @@ export class SettingsPanelComponent {
 
   public handleThemePreview(theme: any): void {
     themeManager.applyTheme(theme);
+  }
+
+  public handleSettingChange(key: string, value: any): void {
+    (this.settings as any)[key] = value;
+    if (key === 'enableHosting') {
+      useAppStore.getState().setEnableHosting(value);
+    }
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.saveSettings) {
+      (window as any).electronAPI.saveSettings(this.settings).catch(console.error);
+    }
   }
 
   public toggleMcpServer(serverId: string): void {

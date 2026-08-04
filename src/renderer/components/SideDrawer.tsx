@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore, ChatMessage, TranscriptParagraph } from '../store/useAppStore';
 import { eventBus } from '../../shared/EventBus';
+import { localAudioStreamer } from '../utils/AudioStreamer';
 
 interface SideDrawerProps {
   onSendMessage: (text: string) => void;
@@ -161,6 +162,69 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
       .catch(console.error);
   };
 
+  const isAiHelperActive = useAppStore((state) => state.isAiHelperActive);
+  const setIsAiHelperActive = useAppStore((state) => state.setIsAiHelperActive);
+
+  const handleToggleListening = async () => {
+    if (isAiHelperActive) {
+      localAudioStreamer.stop();
+      setIsAiHelperActive(false);
+    } else {
+      try {
+        const audioTracks: MediaStreamTrack[] = [];
+
+        // 1. Microphone Audio (User Voice)
+        try {
+          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          micStream.getAudioTracks().forEach((track) => audioTracks.push(track));
+        } catch (err) {
+          console.warn('[AI Drawer] Mic capture skipped or denied:', err);
+        }
+
+        // 2. Capture Entire Screen System Speaker Audio (Computer Output / Playback / Zoom) via Electron Desktop Source
+        try {
+          let screenSourceId = 'screen:0:0';
+          if (typeof window !== 'undefined' && (window as any).electronAPI?.getDesktopSources) {
+            const sources = await (window as any).electronAPI.getDesktopSources({ types: ['screen'] });
+            if (sources && sources.length > 0) {
+              screenSourceId = sources[0].id;
+            }
+          }
+
+          const systemStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: screenSourceId,
+              },
+            } as any,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: screenSourceId,
+              },
+            } as any,
+          });
+
+          systemStream.getAudioTracks().forEach((track) => audioTracks.push(track));
+        } catch (err) {
+          console.warn('[AI Drawer] System speaker audio loopback skipped:', err);
+        }
+
+        if (audioTracks.length === 0) {
+          alert('No audio sources (microphone or system speakers) were available.');
+          return;
+        }
+
+        const combinedStream = new MediaStream(audioTracks);
+        await localAudioStreamer.start(combinedStream, 'local');
+        setIsAiHelperActive(true);
+      } catch (err) {
+        console.warn('Could not start speech listening:', err);
+      }
+    }
+  };
+
   return (
     <div className="side-drawer">
       <div className="drawer-header" style={{ flexDirection: 'column', gap: '8px', paddingBottom: '6px' }}>
@@ -230,7 +294,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
             {/* ACTION TOOLBAR FOR TRANSCRIPTS */}
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(15, 23, 42, 0.6)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                📜 Speech History Log
+                📜 Speech History Log {isAiHelperActive && <span style={{ color: '#34d399', fontSize: '0.68rem' }}>● Live</span>}
               </span>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button
@@ -252,12 +316,31 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
             <div className="messages-list">
               {transcripts.length === 0 ? (
-                <div className="empty-state">
-                  <span style={{ fontSize: '2.2rem' }}>🎙️</span>
-                  <p style={{ marginTop: '8px', fontWeight: 600 }}>Live Speech Transcriptions</p>
-                  <p style={{ fontSize: '0.74rem', opacity: 0.7, marginTop: '4px', lineHeight: 1.4 }}>
-                    Spoken words from the speaker or microphone will automatically append into clean, persistent paragraph blocks below.
+                <div className="empty-state" style={{ padding: '32px 16px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '8px' }}>🎙️</span>
+                  <h4 style={{ margin: '0 0 6px 0', fontSize: '0.95rem', color: '#f8fafc' }}>
+                    {isAiHelperActive ? 'Transcribing Speech...' : 'Microphone Offline'}
+                  </h4>
+                  <p style={{ fontSize: '0.76rem', color: '#94a3b8', margin: '0 0 16px 0', lineHeight: 1.4 }}>
+                    {isAiHelperActive
+                      ? 'Speak into your microphone. Words will automatically append below.'
+                      : 'Click below to start local Whisper STT speech transcription.'}
                   </p>
+                  <button
+                    onClick={handleToggleListening}
+                    style={{
+                      padding: '8px 18px',
+                      borderRadius: '8px',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: isAiHelperActive ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(16, 185, 129, 0.4)',
+                      background: isAiHelperActive ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                      color: isAiHelperActive ? '#f87171' : '#34d399',
+                    }}
+                  >
+                    {isAiHelperActive ? '🔴 Pause Listening' : '▶️ Start Listening'}
+                  </button>
                 </div>
               ) : (
                 <>

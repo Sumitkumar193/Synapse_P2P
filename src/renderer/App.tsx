@@ -11,6 +11,7 @@ import {
 import { TitleBar } from './components/TitleBar';
 import { HostCard } from './components/HostCard';
 import { ViewerCard } from './components/ViewerCard';
+import { AiAssistantCard } from './components/AiAssistantCard';
 import { StreamView } from './components/StreamView';
 import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
     if (container) {
       const panel = new SettingsPanelComponent();
       panel.mount(container);
+      panel.loadCurrentSettings();
       settingsRef.current = panel;
     }
   }, []);
@@ -48,6 +50,7 @@ export const App: React.FC = () => {
   const sources = useAppStore((state) => state.sources);
   const selectedSourceId = useAppStore((state) => state.selectedSourceId);
   const signalingMethod = useAppStore((state) => state.signalingMethod);
+  const enableHosting = useAppStore((state) => state.enableHosting);
   const isHosting = useAppStore((state) => state.isHosting);
   const isViewing = useAppStore((state) => state.isViewing);
   const sessionCode = useAppStore((state) => state.sessionCode);
@@ -385,10 +388,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleOpen2ndWin = () => {
-    window.electronAPI?.openNewWindow?.();
-  };
-
   const handleStartSharing = async (sysAudio: boolean, micAudio: boolean) => {
     const sdk = sdkRef.current;
     if (!sdk) return;
@@ -426,8 +425,7 @@ export const App: React.FC = () => {
 
     setLocalStream(stream);
 
-    // Auto-open Side Chat Drawer and start STT capture (Speaker-First priority)
-    setIsSidePanelOpen(true);
+    useAppStore.getState().setIsAiHelperActive(true);
     if (!remoteStream || remoteStream.getAudioTracks().length === 0) {
       console.log('[Host Mode] 🎙️ No active remote speaker stream. Starting local mic streamer...');
       localAudioStreamer.start(stream, 'local');
@@ -438,6 +436,7 @@ export const App: React.FC = () => {
   const handleStopSharing = async () => {
     stopTimer();
     audioStreamer.stop();
+    useAppStore.getState().setIsAiHelperActive(false);
     resetSessionState();
 
     const sdk = sdkRef.current;
@@ -573,7 +572,6 @@ export const App: React.FC = () => {
         onToggleChat={() => setIsSidePanelOpen(!isSidePanelOpen)}
         onOpenSettings={() => settingsRef.current?.toggle()}
         onSignalingMethodChange={setSignalingMethod}
-        onOpen2ndWin={handleOpen2ndWin}
       />
 
 
@@ -581,8 +579,12 @@ export const App: React.FC = () => {
         <div className="app-main-content">
           {!isViewing ? (
             <div className="compact-container">
-              {!isHosting ? (
-                <div className="dual-dashboard-grid">
+              <div className="dual-dashboard-grid">
+                {/* 1st Card: AI & Speech Assistant Card */}
+                <AiAssistantCard onOpenDrawer={() => setIsSidePanelOpen(true)} />
+
+                {/* 2nd Card: Host Screen Share Card (if enableHosting === true) */}
+                {enableHosting && (
                   <HostCard
                     sources={sources}
                     selectedSourceId={selectedSourceId}
@@ -596,23 +598,11 @@ export const App: React.FC = () => {
                     remainingSeconds={remainingSeconds}
                     isExpired={isExpired}
                   />
-                  <ViewerCard onJoinSession={handleJoinSession} />
-                </div>
-              ) : (
-                <HostCard
-                  sources={sources}
-                  selectedSourceId={selectedSourceId}
-                  onSelectSource={(id) => setSelectedSourceId(id)}
-                  onRefreshSources={() => loadDesktopSources()}
-                  onStartSharing={handleStartSharing}
-                  onStopSharing={handleStopSharing}
-                  isHosting={isHosting}
-                  isConnected={statusState === 'connected'}
-                  sessionCode={sessionCode}
-                  remainingSeconds={remainingSeconds}
-                  isExpired={isExpired}
-                />
-              )}
+                )}
+
+                {/* 3rd Card: Join Remote Screen Card (if not hosting) */}
+                {!isHosting && <ViewerCard onJoinSession={handleJoinSession} />}
+              </div>
             </div>
 
           ) : (

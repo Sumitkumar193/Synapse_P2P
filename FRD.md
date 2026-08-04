@@ -11,42 +11,83 @@ The **Live AI Interview Copilot & P2P Media Platform** transforms real-time scre
 
 ## 🏗️ 2. High-Level Architecture Overview
 
+![Platform High-Level Architecture Diagram](./assets/architecture_diagram.jpg)
+
+```mermaid
+graph TD
+    subgraph P2P_SDK["📺 P2P Media SDK"]
+        MediaStream["Media Streams (session.media.audio / frames)"]
+    end
+
+    subgraph MAIN_PROC["💻 Main Process (Node.js)"]
+        AudioWorker["AudioWorkerController\n(16kHz PCM Buffer)"]
+        RealtimeBus["RealtimeBus Server\n(127.0.0.1 HTTP/WS)"]
+        IPCProxy["MainIPCProxyHandler\n(Category B OS Tools)"]
+        Settings["SettingsManager\n(app_preferences.json)"]
+    end
+
+    subgraph ENGINE_LAYER["⚙️ Worker & Engine Layer"]
+        WhisperSTT["Whisper STT Engine\n(LocalAgreement-n Filter)"]
+        Workflow["Workflow Engine\n(Trigger -> Rule -> Action)"]
+        LLM["AgentWorker / LLM Engine\n(OpenAI / Ollama / Claude CLI)"]
+        MCP["In-Memory MCP Adapter\n(Pending Approval Queue)"]
+        Sandbox["PluginSandbox (Node.js VM)\n(Crash Shield & Timeout)"]
+    end
+
+    subgraph RENDERER["⚛️ Renderer UI Layer"]
+        ChatUI["SideDrawer & Chat Stream"]
+        Overlay["Closed Caption Overlay"]
+        SettingsUI["Glassmorphic Settings Panel"]
+    end
+
+    MediaStream -->|PCM Audio Taps| AudioWorker
+    AudioWorker -->|Audio Chunks| RealtimeBus
+    RealtimeBus -->|WS Events| WhisperSTT
+    WhisperSTT -->|Transcripts| Workflow
+    Workflow -->|Trigger Actions| LLM
+    LLM -->|Tool Calls| MCP
+    MCP -->|OS Tool IPC| IPCProxy
+    MCP -->|Approval Cards / Chat| ChatUI
+    WhisperSTT -->|Live Subtitles| Overlay
 ```
-                                    +-------------------------------------------------------+
-                                    |                 P2P MEDIA SDK                         |
-                                    |       (session.media.audio, session.media.frames)     |
-                                    +---------------------------+---------------------------+
-                                                                | PCM Taps
-                                                                v
-+-----------------------------------------------------------------------------------------------------------------------+
-|                                                   MAIN PROCESS (Node.js)                                               |
-|                                                                                                                       |
-|  +-----------------------+    +---------------------------+    +-----------------------+    +-----------------------+ |
-|  | AudioWorkerController |    |     RealtimeBus Server    |    | MainIPCProxyHandler   |    |   SettingsManager     | |
-|  | (16kHz PCM Buffer)    |--->|    (127.0.0.1 HTTP/WS)    |    | (Category B OS Tools) |    | (app_preferences.json)| |
-|  +-----------+-----------+    +-------------+-------------+    +-----------------------+    +-----------------------+ |
-+--------------|------------------------------|-------------------------------------------------------------------------+
-               |                              | WS Events
-               v                              v
-+-----------------------------------------------------------------------------------------------------------------------+
-|                                                WORKER & ENGINE LAYER                                                  |
-|                                                                                                                       |
-|  +-----------------------+    +---------------------------+    +-----------------------+    +-----------------------+ |
-|  | Whisper STT Engine    |    |      WorkflowEngine       |    |  AgentWorker / LLM    |    |  PluginSandbox (VM)   | |
-|  | (LocalAgreement-n)    |--->|   (Trigger->Rule->Action) |--->| (OpenAI/Ollama/Claude) |    | (Crash Shield & T/O)  | |
-|  +-----------------------+    +-------------+-------------+    +-----------------------+    +-----------------------+ |
-|                                             |                                                                         |
-|                               +-------------v-------------+                                                           |
-|                               |    In-Memory MCP Adapter  |                                                           |
-|                               | (Pending Approval Queue)  |                                                           |
-|                               +-------------+-------------+                                                           |
-+---------------------------------------------|-------------------------------------------------------------------------+
-                                              | Chat & Approval Cards
-                                              v
-+-----------------------------------------------------------------------------------------------------------------------+
-|                                            RENDERER / IN-APP CHAT BAR                                                 |
-|                                [ChatStreamComponent & Inline Approval Cards]                                          |
-+-----------------------------------------------------------------------------------------------------------------------+
+
+---
+
+### 🔌 Model Context Protocol (MCP) Execution Flow
+
+![Model Context Protocol (MCP) Flow Diagram](./assets/mcp_flow_diagram.jpg)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as AI Agent / Claude CLI
+    participant MCP as Embedded In-Memory MCP Adapter
+    participant Queue as Pending Approval Queue
+    participant LocalTools as Category A (Worker Local)
+    participant IPC as MainIPCProxyHandler (OS Tools)
+    participant UI as In-App Chat / SideDrawer
+
+    Client->>MCP: 1. JSON-RPC `initialize` & `tools/list`
+    MCP-->>Client: 2. Return 12 Zod Tool Schemas & `requiresApproval` metadata
+
+    Client->>MCP: 3. JSON-RPC `tools/call` (e.g. `capture_screen`)
+    
+    alt requiresApproval == true
+        MCP->>Queue: Enqueue Pending Tool Request
+        Queue->>UI: Emit `tool_pending_approval` card
+        UI-->>Queue: User clicks [Approve]
+        Queue-->>MCP: Resolve Approval (`tool_approved`)
+    end
+
+    alt Category A (Worker Local Tool)
+        MCP->>LocalTools: Execute In-Memory (`send_chat`, `summarize_session`)
+        LocalTools-->>MCP: Return Result Payload
+    else Category B (OS Tool)
+        MCP->>IPC: Forward IPC Request (`capture_screen`, `clipboard_read`)
+        IPC-->>MCP: Return System Buffer / Captured Data
+    end
+
+    MCP-->>Client: 4. JSON-RPC Response (Result / Status)
 ```
 
 ---

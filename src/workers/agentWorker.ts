@@ -70,8 +70,15 @@ export class AgentWorkerController {
   }
 
   private async handleTranscriptFinal(payload: { text: string; speaker: 'local' | 'remote'; timestamp: number }): Promise<void> {
-
     if (!this.isRunning) return;
+
+    // Disable MCP tool integrations & AI Copilot execution when in remote Joiner mode
+    try {
+      const { useAppStore } = require('../renderer/store/useAppStore');
+      if (useAppStore.getState().isViewing) {
+        return;
+      }
+    } catch {}
 
     // 1. Evaluate workflow engine rules
     await this.workflowEngine.evaluateRules('transcript.final', payload);

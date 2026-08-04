@@ -1,5 +1,6 @@
 import React from 'react';
-import { SignalingMethod } from '../store/useAppStore';
+import { SignalingMethod, useAppStore } from '../store/useAppStore';
+import { localAudioStreamer } from '../utils/AudioStreamer';
 
 interface TitleBarProps {
   statusText: string;
@@ -11,7 +12,6 @@ interface TitleBarProps {
   onToggleChat?: () => void;
   onOpenSettings?: () => void;
   onSignalingMethodChange: (method: SignalingMethod) => void;
-  onOpen2ndWin: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -21,11 +21,28 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   isChatOpen = false,
   onToggleChat,
   onOpenSettings,
-  onOpen2ndWin,
 }) => {
+  const isAiHelperActive = useAppStore((state) => state.isAiHelperActive);
+  const setIsAiHelperActive = useAppStore((state) => state.setIsAiHelperActive);
+
   const handleMinimize = () => window.electronAPI?.minimizeWindow?.();
   const handleMaximize = () => window.electronAPI?.maximizeWindow?.();
   const handleClose = () => window.electronAPI?.closeWindow?.();
+
+  const handleToggleListening = async () => {
+    if (isAiHelperActive) {
+      localAudioStreamer.stop();
+      setIsAiHelperActive(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        await localAudioStreamer.start(stream, 'local');
+        setIsAiHelperActive(true);
+      } catch (err) {
+        console.warn('Could not start mic listening:', err);
+      }
+    }
+  };
 
   const handleOpenSettings = () => {
     if (onOpenSettings) {
@@ -79,14 +96,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           }}
         >
           ⚙️ Settings
-        </button>
-
-        <button
-          className="btn-new-win"
-          onClick={onOpen2ndWin}
-          title="Launch a second window to test Host & Viewer on same computer"
-        >
-          ➕ 2nd Window
         </button>
 
         <div className="window-controls">

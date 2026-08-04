@@ -34,6 +34,7 @@ export interface AppSettings {
   systemPromptInstructions: string;
 
   // Workflow & Safety Controls
+  enableHosting: boolean;
   autoCaptureOnQuestion: boolean;
   autoApprovalForLocalTools: boolean;
   requireApprovalForOsTools: boolean;
@@ -63,6 +64,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   claudeCommand: 'claude',
   systemPromptInstructions: 'Always analyze technical interview questions systematically.',
 
+  enableHosting: true,
   autoCaptureOnQuestion: true,
   autoApprovalForLocalTools: true,
   requireApprovalForOsTools: true,
