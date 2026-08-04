@@ -10,6 +10,8 @@ export interface ElectronAPI {
   writeClipboardText: (text: string) => void;
   getSettings: () => Promise<any>;
   saveSettings: (settings: any) => Promise<any>;
+  sendAudioChunk: (buffer: ArrayBuffer) => void;
+  onTranscript: (callback: (evt: any) => void) => void;
   signaling: {
     joinRoom: (roomId: string, peerId: string) => void;
     leaveRoom: (roomId: string, peerId: string) => void;
@@ -28,6 +30,11 @@ const electronAPI: ElectronAPI = {
   writeClipboardText: (text: string) => ipcRenderer.send('WRITE_CLIPBOARD', text),
   getSettings: () => ipcRenderer.invoke('GET_SETTINGS'),
   saveSettings: (settings: any) => ipcRenderer.invoke('SAVE_SETTINGS', settings),
+  sendAudioChunk: (buffer: ArrayBuffer, speaker: 'local' | 'remote' = 'local') => ipcRenderer.send('AUDIO_CHUNK', { buffer, speaker }),
+
+  onTranscript: (callback: (evt: any) => void) => {
+    ipcRenderer.on('TRANSCRIPT_EVENT', (_event, evt) => callback(evt));
+  },
   signaling: {
     joinRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_JOIN_ROOM', { roomId, peerId }),
     leaveRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_LEAVE_ROOM', { roomId, peerId }),
@@ -41,7 +48,10 @@ const electronAPI: ElectronAPI = {
 
 try {
   contextBridge.exposeInMainWorld('electronAPI', electronAPI);
+  contextBridge.exposeInMainWorld('api', electronAPI);
 } catch (err) {
   console.warn('Could not expose electronAPI on window:', err);
   (window as any).electronAPI = electronAPI;
+  (window as any).api = electronAPI;
 }
+

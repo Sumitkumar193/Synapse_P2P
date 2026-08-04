@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useAppStore, ChatMessage } from '../store/useAppStore';
+import { useAppStore, ChatMessage, TranscriptParagraph } from '../store/useAppStore';
+import { eventBus } from '../../shared/EventBus';
 
 interface SideDrawerProps {
   onSendMessage: (text: string) => void;
@@ -15,13 +16,93 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   onClose,
 }) => {
   const chatMessages = useAppStore((state) => state.chatMessages);
+  const transcripts = useAppStore((state) => state.transcripts);
+  const addTranscriptParagraph = useAppStore((state) => state.addTranscriptParagraph);
+  const lockCurrentParagraph = useAppStore((state) => state.lockCurrentParagraph);
+  const clearTranscripts = useAppStore((state) => state.clearTranscripts);
+
+
+  const [activeTab, setActiveTab] = useState<'transcripts' | 'chat'>('transcripts');
   const [inputMessage, setInputMessage] = useState<string>('');
+
+
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [chatMessages, activeTab]);
+
+  useEffect(() => {
+    transcriptBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [transcripts, activeTab]);
+
+
+  // Listen for transcript events and append clean paragraphs to persistent App Store
+  useEffect(() => {
+    const handleTranscript = (evt: { text: string; speaker?: 'local' | 'remote'; isFinal?: boolean; timestamp?: number }) => {
+      const text = evt.text ? evt.text.trim() : '';
+      if (!text) return;
+
+      // Filter out Whisper decoder silence/hallucination tokens ("you", "thank you", "bye")
+      const lowerNorm = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      const hallucinationTokens = new Set([
+        'you',
+        'thank you',
+        'thanks',
+        'thanks for watching',
+        'subscribe',
+        'subtitles',
+        'subtitles by',
+        'amaraorg',
+        'mb',
+        'bye',
+      ]);
+
+      if (hallucinationTokens.has(lowerNorm) || lowerNorm.length <= 1) {
+        return;
+      }
+
+      const speaker = evt.speaker || 'remote';
+      const timestamp = evt.timestamp || Date.now();
+
+      addTranscriptParagraph({
+        id: Date.now().toString() + Math.random().toString().substring(2, 6),
+        speaker,
+        text,
+        isFinal: !!evt.isFinal,
+        timestamp,
+      });
+    };
+
+
+    // 1. Listen to EventBus local transcript events, P2P closed captions & silence breaks
+    const unsubPartial = eventBus.on('transcript.partial', (evt) => handleTranscript({ ...evt, isFinal: false }));
+    const unsubFinal = eventBus.on('transcript.final', (evt) => handleTranscript({ ...evt, isFinal: true }));
+
+    const unsubCc = eventBus.on('closed_caption', (evt) => {
+      handleTranscript({
+        text: evt.text,
+        speaker: evt.speaker === 'Me' ? 'local' : 'remote',
+        isFinal: evt.isFinal,
+        timestamp: evt.timestamp,
+      });
+    });
+    const unsubPause = eventBus.on('transcript.pause', () => {
+      lockCurrentParagraph();
+    });
+
+
+
+    return () => {
+      unsubPartial();
+      unsubFinal();
+      unsubCc();
+      unsubPause();
+    };
+  }, [addTranscriptParagraph]);
+
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,159 +121,294 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   };
 
   const handleQuickSyncClipboard = () => {
-    navigator.clipboard.readText().then((text) => {
-      if (text.trim()) {
-        onSyncClipboard(text.trim());
-      } else {
-        alert('Your OS clipboard is empty!');
-      }
-    }).catch(() => {
-      // Prompt fallback if browser blocks automatic clipboard read
-      const manual = prompt('Enter text to sync with remote clipboard:');
-      if (manual && manual.trim()) {
-        onSyncClipboard(manual.trim());
-      }
-    });
+    navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text.trim()) {
+          onSyncClipboard(text.trim());
+        } else {
+          alert('Your OS clipboard is empty!');
+        }
+      })
+      .catch(() => {
+        const manual = prompt('Enter text to sync with remote clipboard:');
+        if (manual && manual.trim()) {
+          onSyncClipboard(manual.trim());
+        }
+      });
   };
 
   const handleCopySnippet = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      alert('Copied snippet to your OS clipboard!');
-    }).catch(console.error);
+    navigator.clipboard
+      .writeText(text)
+      .then(() => alert('Copied snippet to clipboard!'))
+      .catch(console.error);
+  };
+
+  const handleCopyAllTranscripts = () => {
+
+    if (transcripts.length === 0) {
+      alert('No transcripts recorded yet!');
+      return;
+    }
+    const fullDoc = transcripts
+      .map((t) => `[${new Date(t.timestamp).toLocaleTimeString()}] ${t.speaker === 'remote' ? 'Speaker' : 'Me'}: ${t.text}`)
+      .join('\n\n');
+
+    navigator.clipboard
+      .writeText(fullDoc)
+      .then(() => alert('📋 Copied entire transcript log to your clipboard!'))
+      .catch(console.error);
   };
 
   return (
     <div className="side-drawer">
-      <div className="drawer-header">
-        <div className="brand" style={{ gap: '8px' }}>
-          <span style={{ fontSize: '1.1rem' }}>💬</span>
-          <span className="brand-title" style={{ fontSize: '0.95rem' }}>
-            Chat & Shared Media
-          </span>
+      <div className="drawer-header" style={{ flexDirection: 'column', gap: '8px', paddingBottom: '6px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div className="brand" style={{ gap: '8px' }}>
+            <span style={{ fontSize: '1.1rem' }}>💬</span>
+            <span className="brand-title" style={{ fontSize: '0.95rem' }}>
+              P2P Media & Transcripts
+            </span>
+          </div>
+          <button className="btn-close-drawer" onClick={onClose} title="Close Side Panel">
+            ✕
+          </button>
         </div>
-        <button className="btn-close-drawer" onClick={onClose} title="Close Side Panel">
-          ✕
-        </button>
+
+        {/* TAB NAVIGATION HEADER */}
+        <div className="tab-navigation-bar" style={{ display: 'flex', gap: '6px', width: '100%' }}>
+          <button
+            className={`tab-btn ${activeTab === 'transcripts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('transcripts')}
+            style={{
+              flex: 1,
+              padding: '6px 10px',
+              borderRadius: '6px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: activeTab === 'transcripts' ? 'rgba(99, 102, 241, 0.35)' : 'rgba(30, 41, 59, 0.6)',
+              color: activeTab === 'transcripts' ? '#ffffff' : '#94a3b8',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+            }}
+          >
+            📜 Transcriptions {transcripts.length > 0 ? `(${transcripts.length})` : ''}
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+            onClick={() => setActiveTab('chat')}
+            style={{
+              flex: 1,
+              padding: '6px 10px',
+              borderRadius: '6px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: activeTab === 'chat' ? 'rgba(99, 102, 241, 0.35)' : 'rgba(30, 41, 59, 0.6)',
+              color: activeTab === 'chat' ? '#ffffff' : '#94a3b8',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+            }}
+          >
+            💬 Chat {chatMessages.length > 0 ? `(${chatMessages.length})` : ''}
+          </button>
+        </div>
       </div>
 
       <div className="drawer-content">
-        <div className="chat-panel">
-          <div className="messages-list">
-            {chatMessages.length === 0 ? (
-              <div className="empty-state">
-                <span style={{ fontSize: '2rem' }}>💬</span>
-                <p style={{ marginTop: '8px' }}>No messages or shared files yet.</p>
-                <p style={{ fontSize: '0.74rem', opacity: 0.7 }}>
-                  Use the toolbar below to chat, attach files, or sync clipboards!
-                </p>
-              </div>
-            ) : (
-              chatMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`message-bubble ${msg.sender === 'local' ? 'local' : 'remote'} ${msg.kind}`}
+        {/* TAB 1: TRANSCRIBED PARAGRAPHS */}
+        {activeTab === 'transcripts' && (
+          <div className="chat-panel">
+            {/* ACTION TOOLBAR FOR TRANSCRIPTS */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(15, 23, 42, 0.6)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                📜 Speech History Log
+              </span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  onClick={handleCopyAllTranscripts}
+                  style={{ background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(129, 140, 248, 0.3)', color: '#818cf8', borderRadius: '4px', padding: '3px 8px', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
+                  title="Copy complete transcript history to clipboard"
                 >
-                  <div className="message-meta">
-                    <span className="sender">
-                      {msg.sender === 'local' ? 'You' : 'Remote Peer'}
-                    </span>
-                    <span className="time">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
+                  📋 Copy Log
+                </button>
+                <button
+                  onClick={clearTranscripts}
+                  style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', borderRadius: '4px', padding: '3px 8px', fontSize: '0.7rem', cursor: 'pointer', fontWeight: 600 }}
+                  title="Clear transcript history"
+                >
+                  🗑️ Clear
+                </button>
+              </div>
+            </div>
 
-                  {/* 1. TEXT MESSAGE */}
-                  {msg.kind === 'text' && <div className="message-text">{msg.text}</div>}
+            <div className="messages-list">
+              {transcripts.length === 0 ? (
+                <div className="empty-state">
+                  <span style={{ fontSize: '2.2rem' }}>🎙️</span>
+                  <p style={{ marginTop: '8px', fontWeight: 600 }}>Live Speech Transcriptions</p>
+                  <p style={{ fontSize: '0.74rem', opacity: 0.7, marginTop: '4px', lineHeight: 1.4 }}>
+                    Spoken words from the speaker or microphone will automatically append into clean, persistent paragraph blocks below.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {transcripts.map((p) => (
+                    <div
+                      key={p.id}
+                      className={`message-bubble ${p.speaker === 'local' ? 'local' : 'remote'} text`}
+                      style={{
+                        padding: '12px 14px',
+                        marginBottom: '6px',
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        borderLeft: p.speaker === 'remote' ? '3px solid #10b981' : '3px solid #6366f1',
+                      }}
+                    >
+                      <div className="message-meta">
+                        <span className="sender" style={{ color: p.speaker === 'remote' ? '#34d399' : '#818cf8', fontWeight: 700 }}>
+                          {p.speaker === 'remote' ? '🔊 Speaker Paragraph' : '🎙️ My Speech'}
+                        </span>
+                        <span className="time">
+                          {new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="message-text" style={{ fontSize: '0.9rem', lineHeight: '1.5', marginTop: '4px', color: '#f8fafc' }}>
+                        {p.text}
+                      </p>
+                    </div>
+                  ))}
+                </>
+              )}
 
-                  {/* 2. INLINE FILE CARD */}
-                  {msg.kind === 'file' && msg.fileData && (
-                    <div className="inline-file-card">
-                      <div className="file-icon">📄</div>
-                      <div className="file-info">
-                        <div className="file-name">{msg.fileData.name}</div>
-                        <div className="file-meta">
-                          {(msg.fileData.size / 1024).toFixed(1)} KB • {msg.fileData.isIncoming ? 'Received' : 'Sent'}
-                        </div>
-                        {msg.fileData.progress !== undefined && msg.fileData.progress < 100 && (
-                          <div className="progress-bar-container">
-                            <div
-                              className="progress-bar-fill"
-                              style={{ width: `${msg.fileData.progress}%` }}
-                            />
+              <div ref={transcriptBottomRef} />
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: CHAT MESSAGES & FILES */}
+        {activeTab === 'chat' && (
+          <div className="chat-panel">
+            <div className="messages-list">
+              {chatMessages.length === 0 ? (
+                <div className="empty-state">
+                  <span style={{ fontSize: '2rem' }}>💬</span>
+                  <p style={{ marginTop: '8px' }}>No text messages or shared files yet.</p>
+                  <p style={{ fontSize: '0.74rem', opacity: 0.7 }}>
+                    Use the toolbar below to chat, attach files, or sync clipboards!
+                  </p>
+                </div>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`message-bubble ${msg.sender === 'local' ? 'local' : 'remote'} ${msg.kind}`}
+                  >
+                    <div className="message-meta">
+                      <span className="sender">
+                        {msg.sender === 'local' ? 'You' : 'Remote Peer'}
+                      </span>
+                      <span className="time">
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    {msg.kind === 'text' && <div className="message-text">{msg.text}</div>}
+
+                    {msg.kind === 'file' && msg.fileData && (
+                      <div className="inline-file-card">
+                        <div className="file-icon">📄</div>
+                        <div className="file-info">
+                          <div className="file-name">{msg.fileData.name}</div>
+                          <div className="file-meta">
+                            {(msg.fileData.size / 1024).toFixed(1)} KB • {msg.fileData.isIncoming ? 'Received' : 'Sent'}
                           </div>
+                          {msg.fileData.progress !== undefined && msg.fileData.progress < 100 && (
+                            <div className="progress-bar-container">
+                              <div
+                                className="progress-bar-fill"
+                                style={{ width: `${msg.fileData.progress}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        {msg.fileData.url && (
+                          <a
+                            href={msg.fileData.url}
+                            download={msg.fileData.name}
+                            className="btn-download-file"
+                            title="Download File"
+                          >
+                            💾
+                          </a>
                         )}
                       </div>
-                      {msg.fileData.url && (
-                        <a
-                          href={msg.fileData.url}
-                          download={msg.fileData.name}
-                          className="btn-download-file"
-                          title="Download File"
+                    )}
+
+                    {msg.kind === 'clipboard' && msg.clipboardData && (
+                      <div className="inline-clipboard-card">
+                        <div className="clipboard-header-tag">📋 Shared Clipboard Snippet</div>
+                        <div className="clipboard-text-snippet">{msg.clipboardData.text}</div>
+                        <button
+                          className="btn-copy-snippet"
+                          onClick={() => handleCopySnippet(msg.clipboardData!.text)}
                         >
-                          💾
-                        </a>
-                      )}
-                    </div>
-                  )}
+                          📋 Copy to My Clipboard
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={chatBottomRef} />
+            </div>
 
-                  {/* 3. INLINE CLIPBOARD SNIPPET */}
-                  {msg.kind === 'clipboard' && msg.clipboardData && (
-                    <div className="inline-clipboard-card">
-                      <div className="clipboard-header-tag">📋 Shared Clipboard Snippet</div>
-                      <div className="clipboard-text-snippet">{msg.clipboardData.text}</div>
-                      <button
-                        className="btn-copy-snippet"
-                        onClick={() => handleCopySnippet(msg.clipboardData!.text)}
-                      >
-                        📋 Copy to My Clipboard
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-            <div ref={chatBottomRef} />
+            <div className="chat-action-bar">
+              <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                className="chat-action-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach File to Send over WebRTC"
+              >
+                📎 File
+              </button>
+              <button
+                type="button"
+                className="chat-action-btn"
+                onClick={handleQuickSyncClipboard}
+                title="Sync OS Clipboard to Chat"
+              >
+                📋 Clipboard
+              </button>
+            </div>
+
+            <form className="chat-input-form" onSubmit={handleSendChat}>
+              <input
+                type="text"
+                className="chat-input"
+                placeholder="Type a message or paste..."
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+              />
+              <button type="submit" className="btn-send-chat">
+                Send ➔
+              </button>
+            </form>
           </div>
-
-          {/* CHAT TOOLBAR & INPUT */}
-          <div className="chat-action-bar">
-            <input
-              type="file"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              className="chat-action-btn"
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach File to Send over WebRTC"
-            >
-              📎 File
-            </button>
-            <button
-              type="button"
-              className="chat-action-btn"
-              onClick={handleQuickSyncClipboard}
-              title="Sync OS Clipboard to Chat"
-            >
-              📋 Clipboard
-            </button>
-          </div>
-
-          <form className="chat-input-form" onSubmit={handleSendChat}>
-            <input
-              type="text"
-              className="chat-input"
-              placeholder="Type a message or paste..."
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-            />
-            <button type="submit" className="btn-send-chat">
-              Send ➔
-            </button>
-          </form>
-        </div>
+        )}
       </div>
     </div>
   );

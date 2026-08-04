@@ -17,13 +17,18 @@ export const StreamView: React.FC<StreamViewProps> = ({
   onEndSession,
 }) => {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const isHosting = useAppStore((state) => state.isHosting);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
+  const [isMicMuted, setIsMicMuted] = useState<boolean>(!isHosting);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
 
   const isSidePanelOpen = useAppStore((state) => state.isSidePanelOpen);
   const setIsSidePanelOpen = useAppStore((state) => state.setIsSidePanelOpen);
   const chatMessages = useAppStore((state) => state.chatMessages);
+
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -83,6 +88,26 @@ export const StreamView: React.FC<StreamViewProps> = ({
     setIsAudioMuted(!isAudioMuted);
   };
 
+  const toggleMic = async () => {
+    const nextMuteState = !isMicMuted;
+    setIsMicMuted(nextMuteState);
+
+    if (localStream && localStream.getAudioTracks().length > 0) {
+      localStream.getAudioTracks().forEach((track) => {
+        track.enabled = !nextMuteState;
+      });
+    } else if (!nextMuteState) {
+      // Joiner dynamic microphone publishing over WebRTC
+      if (typeof window !== 'undefined' && (window as any).sdkInstance) {
+        const micTrack = await (window as any).sdkInstance.publishMicrophone();
+        if (micTrack) {
+          micTrack.enabled = true;
+        }
+      }
+    }
+  };
+
+
   const toggleFullscreen = () => {
     if (remoteVideoRef.current) {
       if (!document.fullscreenElement) {
@@ -95,9 +120,11 @@ export const StreamView: React.FC<StreamViewProps> = ({
 
   return (
     <div className="session-view">
-      <div className="video-viewport">
+      <div className="video-viewport relative">
         <video ref={remoteVideoRef} autoPlay playsInline />
+        <ClosedCaptionOverlay />
         {localStream && (
+
           <video
             ref={localVideoRef}
             autoPlay
@@ -126,9 +153,17 @@ export const StreamView: React.FC<StreamViewProps> = ({
         >
           💬 Chat & Media {chatMessages.length > 0 ? `(${chatMessages.length})` : ''}
         </button>
-        <button className="ctrl-btn" onClick={toggleAudio}>
-          {isAudioMuted ? '🔇 Unmute' : '🔊 Mute'}
+        <button
+          className={`ctrl-btn ${isMicMuted ? 'active-warning' : ''}`}
+          onClick={toggleMic}
+          title="Toggles your microphone to speak in the session"
+        >
+          {isMicMuted ? '🎙️ Mic Muted' : '🎙️ Mic Active'}
         </button>
+        <button className="ctrl-btn" onClick={toggleAudio}>
+          {isAudioMuted ? '🔇 Unmute Speaker' : '🔊 Mute Speaker'}
+        </button>
+
         <button className="ctrl-btn" onClick={toggleFullscreen}>
           {isFullscreen ? '↙ Exit Fullscreen' : '⛶ Fullscreen'}
         </button>

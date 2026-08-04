@@ -113,6 +113,8 @@ export class SettingsPanelComponent {
 
     const autoCaptureOnQuestion = (this.containerEl.querySelector('#settingAutoCapture') as HTMLInputElement)?.checked ?? this.settings.autoCaptureOnQuestion;
     const requireApprovalForOsTools = (this.containerEl.querySelector('#settingRequireApproval') as HTMLInputElement)?.checked ?? this.settings.requireApprovalForOsTools;
+    const autoOpenChatPanel = (this.containerEl.querySelector('#settingAutoOpenChat') as HTMLInputElement)?.checked ?? this.settings.autoOpenChatPanel ?? true;
+    const enableDualSharingJoinPanels = (this.containerEl.querySelector('#settingDualPanels') as HTMLInputElement)?.checked ?? this.settings.enableDualSharingJoinPanels ?? true;
 
     this.settings = {
       ...this.settings,
@@ -131,7 +133,10 @@ export class SettingsPanelComponent {
       systemPromptInstructions,
       autoCaptureOnQuestion,
       requireApprovalForOsTools,
+      autoOpenChatPanel,
+      enableDualSharingJoinPanels,
     };
+
 
     themeManager.applyTheme(appTheme);
 
@@ -360,9 +365,25 @@ export class SettingsPanelComponent {
 
       case 'privacy':
         return `
-          <h2 class="tab-title-dark">🛡️ Privacy & Safety Controls</h2>
+          <h2 class="tab-title-dark">🛡️ Privacy, Safety & Panel Controls</h2>
           
           <div class="form-group-card-dark">
+            <div class="checkbox-row-dark">
+              <input type="checkbox" id="settingAutoOpenChat" ${this.settings.autoOpenChatPanel !== false ? 'checked' : ''} />
+              <div>
+                <strong>Auto-enable Side Chat & AI Copilot Drawer</strong>
+                <p class="field-hint-dark">Automatically opens the Chat, Files, and AI Copilot side-drawer on session launch.</p>
+              </div>
+            </div>
+
+            <div class="checkbox-row-dark">
+              <input type="checkbox" id="settingDualPanels" ${this.settings.enableDualSharingJoinPanels !== false ? 'checked' : ''} />
+              <div>
+                <strong>Enable Share & Join Remote Panels Side-by-Side</strong>
+                <p class="field-hint-dark">Displays both Screen Sharing and Remote Session Joining cards simultaneously.</p>
+              </div>
+            </div>
+
             <div class="checkbox-row-dark">
               <input type="checkbox" id="settingAutoCapture" ${this.settings.autoCaptureOnQuestion ? 'checked' : ''} />
               <div>
@@ -380,6 +401,7 @@ export class SettingsPanelComponent {
             </div>
           </div>
         `;
+
 
       case 'skills':
         return `
@@ -399,20 +421,79 @@ export class SettingsPanelComponent {
 
       case 'connectors':
         return `
-          <h2 class="tab-title-dark">🔌 Connectors & MCP Servers</h2>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h2 class="tab-title-dark" style="margin: 0;">🔌 Connectors & MCP Servers</h2>
+            <button 
+              onclick="window.settingsComponentInstance?.toggleAddMcpServerForm(true)"
+              style="background: #6366f1; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;"
+            >
+              ➕ Add MCP Server
+            </button>
+          </div>
           
+          ${this.isAddingMcpServer ? `
+            <div class="form-group-card-dark" style="margin-bottom: 16px; border: 1px solid rgba(99, 102, 241, 0.4); background: rgba(30, 41, 59, 0.8);">
+              <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 0.95rem; color: #818cf8;">➕ Register New Model Context Protocol (MCP) Server</h3>
+              
+              <div class="form-field-dark">
+                <label>Server Name</label>
+                <input type="text" id="newMcpName" placeholder="e.g. Antigravity MCP Agent" />
+              </div>
+
+              <div class="form-field-dark">
+                <label>Transport Type</label>
+                <select id="newMcpType">
+                  <option value="sse">SSE (Server-Sent Events / HTTP WebSockets)</option>
+                  <option value="stdio">stdio (Standard I/O CLI Command)</option>
+                  <option value="in_memory">IN_MEMORY (Embedded App Tool)</option>
+                </select>
+              </div>
+
+              <div class="form-field-dark">
+                <label>Endpoint URL or Command</label>
+                <input type="text" id="newMcpUrlOrCmd" placeholder="e.g. http://localhost:3000/sse or npx -y @modelcontextprotocol/server-everything" />
+              </div>
+
+              <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;">
+                <button 
+                  onclick="window.settingsComponentInstance?.toggleAddMcpServerForm(false)"
+                  style="background: rgba(148, 163, 184, 0.2); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer;"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onclick="window.settingsComponentInstance?.addCustomMcpServer()"
+                  style="background: #10b981; color: white; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer;"
+                >
+                  Save MCP Server
+                </button>
+              </div>
+            </div>
+          ` : ''}
+
           <div class="form-group-card-dark">
             <div class="mcp-servers-list">
               ${(this.settings.mcpServers || []).map((srv) => `
-                <div class="mcp-server-item-dark">
-                  <div class="mcp-server-info">
-                    <strong class="mcp-server-name">${srv.name}</strong>
-                    <span class="mcp-server-type">Type: ${srv.type.toUpperCase()} ${srv.url ? `(${srv.url})` : ''}</span>
+                <div class="mcp-server-item-dark" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; margin-bottom: 8px; background: rgba(15, 23, 42, 0.6); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                  <div class="mcp-server-info" style="flex: 1;">
+                    <strong class="mcp-server-name" style="color: #f8fafc; font-size: 0.88rem; display: block;">${srv.name}</strong>
+                    <span class="mcp-server-type" style="color: #94a3b8; font-size: 0.76rem;">Type: ${srv.type.toUpperCase()} ${srv.url ? `(${srv.url})` : srv.command ? `(${srv.command})` : ''}</span>
                   </div>
-                  <label class="switch">
-                    <input type="checkbox" ${srv.enabled ? 'checked' : ''} onchange="window.settingsComponentInstance?.toggleMcpServer('${srv.id}')" />
-                    <span class="slider"></span>
-                  </label>
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <label class="switch">
+                      <input type="checkbox" ${srv.enabled ? 'checked' : ''} onchange="window.settingsComponentInstance?.toggleMcpServer('${srv.id}')" />
+                      <span class="slider"></span>
+                    </label>
+                    ${srv.id !== 'default_builtin' ? `
+                      <button 
+                        onclick="window.settingsComponentInstance?.deleteMcpServer('${srv.id}')"
+                        style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; border-radius: 4px; padding: 4px 8px; font-size: 0.72rem; cursor: pointer;"
+                        title="Delete MCP Server"
+                      >
+                        🗑️
+                      </button>
+                    ` : ''}
+                  </div>
                 </div>
               `).join('')}
             </div>
@@ -439,6 +520,45 @@ export class SettingsPanelComponent {
     }
   }
 
+  private isAddingMcpServer: boolean = false;
+
+  public toggleAddMcpServerForm(show: boolean): void {
+    this.isAddingMcpServer = show;
+    this.render();
+  }
+
+  public addCustomMcpServer(): void {
+    const nameEl = document.getElementById('newMcpName') as HTMLInputElement;
+    const typeEl = document.getElementById('newMcpType') as HTMLSelectElement;
+    const urlOrCmdEl = document.getElementById('newMcpUrlOrCmd') as HTMLInputElement;
+
+    const name = nameEl?.value?.trim() || 'Custom MCP Server';
+    const type = (typeEl?.value || 'sse') as 'in_memory' | 'sse' | 'stdio';
+    const urlOrCmd = urlOrCmdEl?.value?.trim() || '';
+
+    const newServer = {
+      id: `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name,
+      type,
+      url: type === 'sse' ? urlOrCmd : undefined,
+      command: type === 'stdio' ? urlOrCmd : undefined,
+      enabled: true,
+    };
+
+    if (!this.settings.mcpServers) {
+      this.settings.mcpServers = [];
+    }
+
+    this.settings.mcpServers.push(newServer);
+    this.isAddingMcpServer = false;
+    this.render();
+  }
+
+  public deleteMcpServer(serverId: string): void {
+    this.settings.mcpServers = (this.settings.mcpServers || []).filter((s) => s.id !== serverId);
+    this.render();
+  }
+
   public handleThemePreview(theme: any): void {
     themeManager.applyTheme(theme);
   }
@@ -450,3 +570,4 @@ export class SettingsPanelComponent {
     }
   }
 }
+

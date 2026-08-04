@@ -37,6 +37,8 @@ export interface AppSettings {
   autoCaptureOnQuestion: boolean;
   autoApprovalForLocalTools: boolean;
   requireApprovalForOsTools: boolean;
+  autoOpenChatPanel: boolean;
+  enableDualSharingJoinPanels: boolean;
 
   // MCP Servers Configuration
   mcpServers: MCPServerConfig[];
@@ -64,6 +66,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoCaptureOnQuestion: true,
   autoApprovalForLocalTools: true,
   requireApprovalForOsTools: true,
+  autoOpenChatPanel: true,
+  enableDualSharingJoinPanels: true,
 
   mcpServers: [
     {

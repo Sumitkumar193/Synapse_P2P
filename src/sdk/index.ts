@@ -215,6 +215,33 @@ export class P2PMediaSDK {
     return this.currentSession;
   }
 
+  public async publishMicrophone(): Promise<MediaStreamTrack | null> {
+    try {
+      const micTrack = await this.mediaManager.captureMicrophone({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      });
+      micTrack.contentHint = 'speech';
+
+      let activeStream = this.mediaManager.getActiveStream();
+      if (!activeStream) {
+        activeStream = new MediaStream([micTrack]);
+      } else if (!activeStream.getAudioTracks().includes(micTrack)) {
+        activeStream.addTrack(micTrack);
+      }
+
+      if (this.transport) {
+        this.transport.addStream(activeStream);
+      }
+      return micTrack;
+    } catch (err) {
+      this.logger.warn('Failed to publish microphone track:', err);
+      return null;
+    }
+  }
+
+
   public startSessionTimer(): void {
     this.cancelSessionTimer();
     const timeout = this.config.sessionTimeoutMs || 120000;

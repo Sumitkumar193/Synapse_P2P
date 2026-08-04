@@ -53,6 +53,14 @@ export class SessionEventBridge {
     // Emit locally on EventBus for local UI
     eventBus.emit('closed_caption', payload);
 
+    if (isFinal) {
+      eventBus.emit('cc.chat.local', {
+        text: `🎙️ [CC - Me]: "${text}"`,
+        tag: 'me',
+        timestamp: payload.timestamp,
+      });
+    }
+
     // Stream over P2P DataChannel to connected joiners
     try {
       this.session.data.sendJson(payload);
@@ -62,13 +70,23 @@ export class SessionEventBridge {
   private async handleIncomingDataMessage(payload: any): Promise<void> {
     // Handle incoming Closed Caption from Host
     if (payload.type === 'closed_caption') {
+      const timestamp = payload.timestamp || Date.now();
       eventBus.emit('closed_caption', {
         text: payload.text,
         speaker: payload.speaker || 'Host',
         isFinal: payload.isFinal,
-        timestamp: payload.timestamp || Date.now(),
+        timestamp,
       });
+
+      if (payload.isFinal) {
+        eventBus.emit('cc.chat.remote', {
+          text: `🎙️ [CC - Received]: "${payload.text}"`,
+          tag: 'received',
+          timestamp,
+        });
+      }
     }
+
 
     // Handle incoming remote MCP Tool Call request
     if (payload.type === 'mcp_request' && this.mcpAdapter && payload.request) {

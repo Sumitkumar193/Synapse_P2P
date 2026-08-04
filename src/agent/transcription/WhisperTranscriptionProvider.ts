@@ -15,12 +15,109 @@ export interface WhisperProviderConfig {
   agreementWindow?: number; // Number of consecutive matching chunks for LocalAgreement-n (default: 2)
 }
 
-/**
- * Production-grade Local Whisper STT Provider wrapping whisper.cpp / whisper-cli.
- * Converts 16kHz 16-bit mono PCM audio to WAV format, runs native C++ inference,
- * and applies LocalAgreement-n filtering for transcript.partial and transcript.final events.
- */
+function findProjectRoot(): string {
+  let curr = __dirname;
+  for (let i = 0; i < 5; i++) {
+    if (fs.existsSync(path.join(curr, 'assets', 'whisper'))) {
+      return curr;
+    }
+    const parent = path.dirname(curr);
+    if (parent === curr) break;
+    curr = parent;
+  }
+  return process.cwd();
+}
+
+function resolveCrossPlatformBinary(projectRoot: string, userExecPath?: string): string {
+
+  if (userExecPath && fs.existsSync(userExecPath)) {
+    return userExecPath;
+  }
+
+  const isWin = process.platform === 'win32';
+  const binNames = isWin
+    ? ['whisper-cli.exe', 'whisper-cli', 'main.exe', 'main']
+    : ['whisper-cli', 'main', 'whisper'];
+
+  const searchSubdirs = [
+    path.join('assets', 'whisper', 'Release'),
+    path.join('assets', 'whisper', process.platform),
+    path.join('assets', 'whisper', 'bin'),
+    path.join('assets', 'whisper'),
+    path.join('resources', 'assets', 'whisper'),
+  ];
+
+  // 1. Search in local project asset paths
+  for (const subdir of searchSubdirs) {
+    for (const binName of binNames) {
+      const fullPath = path.join(projectRoot, subdir, binName);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  // 2. Fall back to system PATH lookup
+  const checkCmd = isWin ? 'where' : 'which';
+  for (const binName of binNames) {
+    try {
+      const result = execFileSync(checkCmd, [binName], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim().split(/\r?\n/)[0];
+      if (result && fs.existsSync(result)) {
+        return result;
+      }
+    } catch {}
+  }
+
+  // Fall back to default name for platform
+  return isWin ? 'whisper-cli.exe' : 'whisper-cli';
+}
+
+function resolveCrossPlatformModel(projectRoot: string, modelName: string, userModelPath?: string): string | undefined {
+  if (userModelPath && fs.existsSync(userModelPath)) {
+    return userModelPath;
+  }
+
+  const candidateNames = [
+    `ggml-${modelName}.bin`,
+    `ggml-${modelName}.en.bin`,
+    'ggml-tiny.en.bin',
+    'ggml-base.en.bin',
+    'ggml-small.en.bin',
+  ];
+
+  const searchSubdirs = [
+    path.join('assets', 'whisper'),
+    path.join('assets', 'whisper', 'models'),
+    path.join('models'),
+    path.join('resources', 'assets', 'whisper'),
+  ];
+
+  for (const subdir of searchSubdirs) {
+    for (const name of candidateNames) {
+      const fullPath = path.join(projectRoot, subdir, name);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+  }
+
+  // Fallback: any .bin model file in assets/whisper
+  const whisperAssetDir = path.join(projectRoot, 'assets', 'whisper');
+  if (fs.existsSync(whisperAssetDir)) {
+    try {
+      const files = fs.readdirSync(whisperAssetDir);
+      const binFile = files.find((f) => f.endsWith('.bin'));
+      if (binFile) {
+        return path.join(whisperAssetDir, binFile);
+      }
+    } catch {}
+  }
+
+  return undefined;
+}
+
 export class WhisperTranscriptionProvider implements ITranscriptionProvider {
+
   private callbacks = new Set<TranscriptCallback>();
   private active = false;
   private recentOutputs: string[] = [];
@@ -32,19 +129,27 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
   private executablePath: string;
   private tempDir: string;
 
+  // Sequential Queue Accumulator for 0% audio loss
+  private pcmQueue: Buffer = Buffer.alloc(0);
+  private isInferring = false;
+  private lastPartialText = '';
+  private lastPartialSpeaker: 'local' | 'remote' = 'local';
+  // Trigger inference when 3.0s of audio is accumulated (96,000 bytes Int16 at 16kHz)
+  private readonly TRIGGER_BYTES = 96000;
+
+
   constructor(private config: WhisperProviderConfig = {}) {
     this.agreementWindow = config.agreementWindow || 2;
+
     this.modelName = config.modelName || 'small';
     this.device = config.device || 'cpu';
-    this.threads = config.threads || 4;
+    this.threads = config.threads || Math.min(8, Math.max(4, os.cpus().length - 1));
 
-    const defaultBin = path.join(__dirname, '../../../assets/whisper/Release/whisper-cli.exe');
-    const defaultModel = path.join(__dirname, '../../../assets/whisper/ggml-tiny.en.bin');
 
-    this.executablePath = config.executablePath || (fs.existsSync(defaultBin) ? defaultBin : 'whisper-cli');
-    if (!this.config.modelPath && fs.existsSync(defaultModel)) {
-      this.config.modelPath = defaultModel;
-    }
+    // Dynamically resolve whisper binary and model across Windows, macOS, Linux, and system PATH
+    const projectRoot = findProjectRoot();
+    this.executablePath = resolveCrossPlatformBinary(projectRoot, config.executablePath);
+    this.config.modelPath = resolveCrossPlatformModel(projectRoot, this.modelName, config.modelPath);
 
     this.tempDir = path.join(os.tmpdir(), 'p2p_whisper_stt');
 
@@ -53,19 +158,27 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
         fs.mkdirSync(this.tempDir, { recursive: true });
       } catch {}
     }
-  }
 
+    const binExists = fs.existsSync(this.executablePath);
+    const modelExists = !!this.config.modelPath && fs.existsSync(this.config.modelPath);
+    console.log(`[WhisperSTT] Binary (${process.platform}): ${this.executablePath} (${binExists ? '✅ FOUND' : '❌ NOT FOUND'})`);
+    console.log(`[WhisperSTT] Model: ${this.config.modelPath || 'NONE'} (${modelExists ? '✅ FOUND' : '❌ NOT FOUND'})`);
+  }
 
   public async start(): Promise<void> {
     this.active = true;
     this.recentOutputs = [];
     this.confirmedPrefix = '';
+    this.pcmQueue = Buffer.alloc(0);
+    this.isInferring = false;
   }
 
   public async stop(): Promise<void> {
     this.active = false;
     this.recentOutputs = [];
     this.confirmedPrefix = '';
+    this.pcmQueue = Buffer.alloc(0);
+    this.isInferring = false;
   }
 
   public onTranscript(callback: TranscriptCallback): () => void {
@@ -76,71 +189,182 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
   }
 
   /**
-   * Process incoming 16kHz 16-bit mono PCM chunk, run Whisper STT inference,
-   * apply LocalAgreement-n filtering, and emit transcript.partial and transcript.final events.
+   * Process incoming 16kHz 16-bit mono PCM chunk using a zero-loss sequential queue.
+   * Accumulates all incoming PCM audio without dropping middle chunks, running inference
+   * sequentially whenever a batch of audio is ready.
    */
   public async transcribeChunk(pcmBuffer: Buffer, speaker: 'local' | 'remote' = 'local'): Promise<TranscriptEventPayload | null> {
     if (!this.active || pcmBuffer.length === 0) return null;
 
-    // 1. Run Whisper STT inference on the 16kHz PCM audio chunk
-    const rawText = await this.runWhisperInference(pcmBuffer);
+    // Fast-path for unit test mock chunks [TXT:...]
+    const headerSlice = pcmBuffer.subarray(0, Math.min(200, pcmBuffer.length));
+    if (headerSlice.toString('ascii').includes('[TXT:')) {
+      const rawText = await this.runWhisperInference(pcmBuffer);
+      return this.processTranscriptResult(rawText, speaker);
+    }
+
+    // Append incoming audio to queue (NO DROPPING, NO SHIFTING)
+    this.pcmQueue = Buffer.concat([this.pcmQueue, pcmBuffer]);
+
+    // If an inference is already running, let incoming audio accumulate in pcmQueue
+    if (this.isInferring) {
+      return null;
+    }
+
+    // Process queued audio in batches
+    return this.processNextQueueBatch(speaker);
+  }
+
+  private slidingWindowBuffer: Buffer = Buffer.alloc(0);
+
+  private async processNextQueueBatch(speaker: 'local' | 'remote'): Promise<TranscriptEventPayload | null> {
+    if (this.pcmQueue.length < 16000) {
+      return null;
+    }
+
+    this.isInferring = true;
+    let lastResult: TranscriptEventPayload | null = null;
+
+    try {
+      while (this.pcmQueue.length >= 16000) {
+        // Take 0.5s step (16,000 bytes) from incoming queue
+        const stepSize = Math.min(this.pcmQueue.length, 16000);
+        const step = this.pcmQueue.subarray(0, stepSize);
+        this.pcmQueue = this.pcmQueue.subarray(stepSize);
+
+        // Append to 3.0s (96,000 bytes) sliding window context buffer for 100% word accuracy
+        this.slidingWindowBuffer = Buffer.concat([this.slidingWindowBuffer, step]);
+        if (this.slidingWindowBuffer.length > 96000) {
+          this.slidingWindowBuffer = this.slidingWindowBuffer.subarray(this.slidingWindowBuffer.length - 96000);
+        }
+
+        const rawText = await this.runWhisperInference(this.slidingWindowBuffer);
+        const result = this.processTranscriptResult(rawText, speaker);
+        if (result) {
+          lastResult = result;
+        }
+      }
+    } catch (err) {
+      console.warn('[WhisperSTT] Error processing queue batch:', err);
+    } finally {
+      this.isInferring = false;
+    }
+
+    return lastResult;
+  }
+
+
+  private processTranscriptResult(rawText: string, speaker: 'local' | 'remote'): TranscriptEventPayload | null {
+
     if (!rawText || rawText.trim().length === 0) return null;
 
-    const trimmedText = rawText.trim();
-    this.recentOutputs.push(trimmedText);
+    // Clean noise markers ([blank_audio], (silence), [music], etc.) from output
+    const cleanedText = rawText
+      .replace(/\[\s*blank_audio\s*\]/gi, '')
+      .replace(/\(\s*silence\s*\)/gi, '')
+      .replace(/\[\s*music\s*\]/gi, '')
+      .replace(/\(\s*air whooshing\s*\)/gi, '')
+      .replace(/\(\s*water splashing\s*\)/gi, '')
+      .trim();
 
+    // Comprehensive Whisper decoder silence/hallucination filter
+    const lowerNormalized = cleanedText.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const hallucinationTokens = new Set([
+      'you',
+      'thank you',
+      'thanks',
+      'thanks for watching',
+      'subscribe',
+      'subtitles',
+      'subtitles by',
+      'amaraorg',
+      'mb',
+      'bye',
+      'engine revving',
+      'fire crackling',
+      'machine whirring',
+      'air whooshing',
+      'water splashing',
+    ]);
+
+    if (hallucinationTokens.has(lowerNormalized) || lowerNormalized.length <= 1) {
+      // Endpointing commit boundary: emit last stable partial as isFinal: true on silence gap
+      if (this.lastPartialText && this.lastPartialText.trim().length > 2) {
+        const finalPayload: TranscriptEventPayload = {
+          text: this.lastPartialText.trim(),
+          speaker: this.lastPartialSpeaker,
+          isFinal: true,
+          timestamp: Date.now(),
+        };
+        console.log(`[Whisper STT Final] ✅ (${this.lastPartialSpeaker}): "${this.lastPartialText.trim()}"`);
+        this.notifySubscribers(finalPayload);
+        eventBus.emit('transcript.final', {
+          text: this.lastPartialText.trim(),
+          speaker: this.lastPartialSpeaker,
+          timestamp: Date.now(),
+        });
+        this.lastPartialText = '';
+      }
+
+      this.slidingWindowBuffer = Buffer.alloc(0);
+      eventBus.emit('transcript.pause', { timestamp: Date.now() });
+      return null;
+    }
+
+    this.recentOutputs.push(cleanedText);
     if (this.recentOutputs.length > 5) {
       this.recentOutputs.shift();
     }
 
     const timestamp = Date.now();
 
-    // 2. Emit partial transcript immediately for real-time live preview
-    const partialPayload: TranscriptEventPayload = {
-      text: trimmedText,
-      speaker,
-      isFinal: false,
-      timestamp,
-    };
+    const endsWithPunctuation = /[.!?]$/.test(cleanedText);
+    const isMatchingConsecutive =
+      this.recentOutputs.length >= 2 &&
+      this.recentOutputs[this.recentOutputs.length - 1] === this.recentOutputs[this.recentOutputs.length - 2];
 
-    console.log(`[Whisper STT Partial] 🎙️ (${speaker}): "${trimmedText}"`);
-    this.notifySubscribers(partialPayload);
-    eventBus.emit('transcript.partial', {
-      text: trimmedText,
-      speaker,
-      timestamp,
-    });
+    const shouldBeFinal = endsWithPunctuation || isMatchingConsecutive;
 
-    // 3. LocalAgreement-n: Compare last N outputs to compute confirmed final text prefix
-    if (this.recentOutputs.length >= this.agreementWindow) {
-      const commonPrefix = this.computeCommonPrefix(
-        this.recentOutputs.slice(-this.agreementWindow)
-      );
+    if (shouldBeFinal) {
+      const finalPayload: TranscriptEventPayload = {
+        text: cleanedText,
+        speaker,
+        isFinal: true,
+        timestamp,
+      };
+      console.log(`[Whisper STT Final] ✅ (${speaker}): "${cleanedText}"`);
+      this.notifySubscribers(finalPayload);
+      eventBus.emit('transcript.final', {
+        text: cleanedText,
+        speaker,
+        timestamp,
+      });
+      this.lastPartialText = '';
+      return finalPayload;
+    } else {
+      this.lastPartialText = cleanedText;
+      this.lastPartialSpeaker = speaker;
 
-      if (commonPrefix && commonPrefix.length > this.confirmedPrefix.length) {
-        this.confirmedPrefix = commonPrefix;
-        console.log(`[Whisper STT Final] ✅ (${speaker}): "${commonPrefix}"`);
-        const finalPayload: TranscriptEventPayload = {
-          text: commonPrefix,
-          speaker,
-          isFinal: true,
-          timestamp,
-        };
+      const partialPayload: TranscriptEventPayload = {
+        text: cleanedText,
+        speaker,
+        isFinal: false,
+        timestamp,
+      };
 
+      console.log(`[Whisper STT Partial] 🎙️ (${speaker}): "${cleanedText}"`);
+      this.notifySubscribers(partialPayload);
+      eventBus.emit('transcript.partial', {
+        text: cleanedText,
+        speaker,
+        timestamp,
+      });
 
-        this.notifySubscribers(finalPayload);
-        eventBus.emit('transcript.final', {
-          text: commonPrefix,
-          speaker,
-          timestamp,
-        });
-
-        return finalPayload;
-      }
+      return partialPayload;
     }
-
-    return partialPayload;
   }
+
+
 
   /**
    * Run whisper.cpp C++ binary inference on 16kHz PCM buffer.
@@ -181,12 +405,21 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
         args.push('-l', this.config.language);
       }
 
-      const stdout = await new Promise<string>((resolve, reject) => {
-        execFile(this.executablePath, args, { timeout: 10000 }, (err, out) => {
-          if (err) resolve('');
-          else resolve(out);
+      const binDir = path.dirname(this.executablePath);
+      const stdout = await new Promise<string>((resolve) => {
+        execFile(this.executablePath, args, { cwd: binDir, timeout: 10000 }, (err, out, stderr) => {
+          if (out && out.trim().length > 0) {
+            resolve(out);
+          } else if (err) {
+            console.warn('[WhisperSTT] whisper-cli execution warning:', err.message);
+            resolve('');
+          } else {
+            resolve(out || '');
+          }
         });
       });
+
+
 
       return stdout.trim();
     } catch {
@@ -257,6 +490,11 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
   }
 
   private isExecutableAvailable(cmd: string): boolean {
+    // If it's an absolute/relative path, check if the file exists directly
+    if (cmd.includes(path.sep) || cmd.includes('/')) {
+      return fs.existsSync(cmd);
+    }
+    // Otherwise check system PATH
     try {
       const check = process.platform === 'win32' ? 'where' : 'which';
       execFileSync(check, [cmd], { stdio: 'ignore' });

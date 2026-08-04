@@ -11,7 +11,12 @@ export interface EventMap {
   'tool_approved': { approvalId: string; toolName: string; approvedBy?: string; result?: any; timestamp?: number };
   'tool_dismissed': { approvalId: string; toolName: string; dismissedBy?: string; timestamp?: number };
   'closed_caption': { text: string; speaker: string; isFinal: boolean; timestamp: number };
+  'cc.chat.local': { text: string; tag: string; timestamp: number };
+  'cc.chat.remote': { text: string; tag: string; timestamp: number };
+  'transcript.pause': { timestamp: number };
 }
+
+
 
 
 

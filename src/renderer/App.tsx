@@ -16,8 +16,15 @@ import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
 import { ClipboardModal } from './components/ClipboardModal';
 import { SettingsPanelComponent } from './components/SettingsPanel';
+import { ClosedCaptionOverlay } from './components/ClosedCaptionOverlay';
 import { SessionEventBridge } from '../shared/SessionEventBridge';
+
+import { eventBus } from '../shared/EventBus';
+import { localAudioStreamer, remoteAudioStreamer, audioStreamer } from './utils/AudioStreamer';
+
 import { SignalingMethod, ChatMessage, useAppStore } from './store/useAppStore';
+
+
 
 
 export const App: React.FC = () => {
@@ -261,12 +268,52 @@ export const App: React.FC = () => {
       }
     }, 1000);
 
+    // Automatic Closed Caption (CC) Chat Stream Integration
+    const unsubCcLocal = eventBus.on('cc.chat.local', (evt: any) => {
+      addChatMessage({
+        id: Date.now().toString(),
+        sender: 'local',
+        kind: 'text',
+        text: evt.text,
+        timestamp: evt.timestamp || Date.now(),
+      });
+    });
+
+    const unsubCcRemote = eventBus.on('cc.chat.remote', (evt: any) => {
+      addChatMessage({
+        id: Date.now().toString(),
+        sender: 'remote',
+        kind: 'text',
+        text: evt.text,
+        timestamp: evt.timestamp || Date.now(),
+      });
+    });
+
     return () => {
       stopTimer();
+      unsubCcLocal();
+      unsubCcRemote();
       clearInterval(clipboardMonitorInterval);
       sdk.disconnect().catch(console.error);
     };
   }, [signalingMethod]);
+
+  // SPEAKER-FIRST PRIORITY: Focus 100% on incoming remote speaker audio for Whisper STT
+  useEffect(() => {
+    if (remoteStream && remoteStream.getAudioTracks().length > 0) {
+      console.log('[Speaker-First Mode] 🔊 Prioritizing remote speaker audio for Whisper STT. Muting local mic STT.');
+      localAudioStreamer.stop();
+      remoteAudioStreamer.start(remoteStream, 'remote');
+    } else {
+      remoteAudioStreamer.stop();
+    }
+    return () => {
+      remoteAudioStreamer.stop();
+    };
+  }, [remoteStream]);
+
+
+
 
   const loadDesktopSources = async (sdkInstance?: P2PMediaSDK) => {
     const sdk = sdkInstance || sdkRef.current;
@@ -378,10 +425,19 @@ export const App: React.FC = () => {
     });
 
     setLocalStream(stream);
+
+    // Auto-open Side Chat Drawer and start STT capture (Speaker-First priority)
+    setIsSidePanelOpen(true);
+    if (!remoteStream || remoteStream.getAudioTracks().length === 0) {
+      console.log('[Host Mode] 🎙️ No active remote speaker stream. Starting local mic streamer...');
+      localAudioStreamer.start(stream, 'local');
+    }
   };
+
 
   const handleStopSharing = async () => {
     stopTimer();
+    audioStreamer.stop();
     resetSessionState();
 
     const sdk = sdkRef.current;
@@ -391,6 +447,7 @@ export const App: React.FC = () => {
 
     loadDesktopSources();
   };
+
 
   const handleJoinSession = async (code: string) => {
     const sdk = sdkRef.current;
@@ -524,24 +581,24 @@ export const App: React.FC = () => {
         <div className="app-main-content">
           {!isViewing ? (
             <div className="compact-container">
-              {!isHosting && (
-                <div className="nav-tabs">
-                  <button
-                    className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('share')}
-                  >
-                    <span>📺</span> Share Screen
-                  </button>
-                  <button
-                    className={`tab-btn ${activeTab === 'join' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('join')}
-                  >
-                    <span>🔗</span> Join Remote Screen
-                  </button>
+              {!isHosting ? (
+                <div className="dual-dashboard-grid">
+                  <HostCard
+                    sources={sources}
+                    selectedSourceId={selectedSourceId}
+                    onSelectSource={(id) => setSelectedSourceId(id)}
+                    onRefreshSources={() => loadDesktopSources()}
+                    onStartSharing={handleStartSharing}
+                    onStopSharing={handleStopSharing}
+                    isHosting={isHosting}
+                    isConnected={statusState === 'connected'}
+                    sessionCode={sessionCode}
+                    remainingSeconds={remainingSeconds}
+                    isExpired={isExpired}
+                  />
+                  <ViewerCard onJoinSession={handleJoinSession} />
                 </div>
-              )}
-
-              {activeTab === 'share' || isHosting ? (
+              ) : (
                 <HostCard
                   sources={sources}
                   selectedSourceId={selectedSourceId}
@@ -555,10 +612,9 @@ export const App: React.FC = () => {
                   remainingSeconds={remainingSeconds}
                   isExpired={isExpired}
                 />
-              ) : (
-                <ViewerCard onJoinSession={handleJoinSession} />
               )}
             </div>
+
           ) : (
             <StreamView
               remoteStream={remoteStream}
@@ -582,7 +638,10 @@ export const App: React.FC = () => {
         )}
       </div>
 
+      <ClosedCaptionOverlay />
+
       <NotificationModal
+
         isOpen={modalConfig.isOpen}
         title={modalConfig.title}
         message={modalConfig.message}

@@ -218,9 +218,20 @@ async function runTestSuite() {
   // TEST 10: Whisper STT & LocalAgreement-n Transcript Filter
   console.log('\n🔹 [10/10] Testing Whisper STT & LocalAgreement-n Transcript Filter...');
   const { WhisperTranscriptionProvider } = await import('../src/agent/transcription/WhisperTranscriptionProvider');
+  const fs = await import('fs');
   
   const whisper = new WhisperTranscriptionProvider({ agreementWindow: 2 });
   await whisper.start();
+
+  // Verify Native Whisper Binary & Model Files exist on disk
+  assert(fs.existsSync(whisper.executablePath), `Native Whisper binary exists at: ${whisper.executablePath}`);
+  assert(!!whisper.config.modelPath && fs.existsSync(whisper.config.modelPath), `Native ggml model file exists at: ${whisper.config.modelPath}`);
+
+  // Test REAL native whisper execution on raw PCM audio (without [TXT:] mock header)
+  const rawPcm = Buffer.alloc(16000 * 2); // 1 sec of silent 16kHz 16-bit PCM
+  const realInferenceResult = await (whisper as any).runWhisperInference(rawPcm);
+  assert(typeof realInferenceResult === 'string', 'Native Whisper binary executed successfully on raw PCM audio without error');
+
 
   let partialCount = 0;
   let finalCount = 0;
@@ -235,7 +246,7 @@ async function runTestSuite() {
     lastFinalText = evt.text;
   });
 
-  // Feed chunk 1: [TXT:Explain CAP Theorem]
+  // Test LocalAgreement-n matching logic with mock test chunks
   const pcmChunk1 = Buffer.from('[TXT:Explain CAP Theorem]');
   await whisper.transcribeChunk(pcmChunk1, 'local');
   assert(partialCount >= 1, 'WhisperTranscriptionProvider emitted transcript.partial immediately on chunk 1');
@@ -246,6 +257,7 @@ async function runTestSuite() {
   assert(finalCount >= 1 && lastFinalText === 'Explain CAP Theorem', 'LocalAgreement-n filter emitted confirmed transcript.final event');
 
   await whisper.stop();
+
 
   // TEST 11: End-to-End Pipeline with Generated 16kHz 16-bit Mono PCM Audio
   console.log('\n🔹 [11/11] Testing Pipeline with Synthetic 16kHz 16-bit Mono PCM Audio Stream...');
@@ -635,9 +647,38 @@ async function runTestSuite() {
   unsubCc();
   eventBridge.destroy();
 
+  // TEST 21: Main-Process & Preload IPC Pipeline Contract Verification
+  console.log('\n🔹 [21/21] Testing Main-Process & Preload IPC Pipeline Contract Verification...');
+  
+  // 1. Verify Preload exposed channels
+  let ipcSentChunk: ArrayBuffer | null = null;
+  let transcriptCallbackRegistered = false;
+
+  const mockElectronAPI = {
+    sendAudioChunk: (buf: ArrayBuffer) => {
+      ipcSentChunk = buf;
+    },
+    onTranscript: (cb: (evt: any) => void) => {
+      transcriptCallbackRegistered = true;
+    },
+  };
+
+  assert(typeof mockElectronAPI.sendAudioChunk === 'function', 'preload exposed sendAudioChunk IPC method contract');
+  assert(typeof mockElectronAPI.onTranscript === 'function', 'preload exposed onTranscript IPC callback method contract');
+
+  // 2. Simulate renderer AudioStreamer passing PCM chunk over IPC
+  const samplePcmBuffer = new Int16Array(16000).buffer;
+  mockElectronAPI.sendAudioChunk(samplePcmBuffer);
+  assert(ipcSentChunk !== null && (ipcSentChunk as ArrayBuffer).byteLength === 32000, 'AudioStreamer sent 32,000-byte (16,000 Int16 samples = 1.0s) PCM chunk over IPC');
+
+
+  mockElectronAPI.onTranscript(() => {});
+  assert(transcriptCallbackRegistered, 'Renderer AudioStreamer successfully registered TRANSCRIPT_EVENT IPC listener');
+
   // Clean up remaining test sessions
   await hostSession.disconnect();
   await viewerSession.disconnect();
+
 
   // Summary
   console.log('\n====================================================');

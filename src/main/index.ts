@@ -41,6 +41,26 @@ ipcMain.handle('GET_REALTIME_BUS_INFO', () => {
   return realtimeBusInfo;
 });
 
+// Receive 16kHz Int16 PCM audio chunks from renderer AudioStreamer (local mic or remote speaker), feed to Whisper STT
+ipcMain.on('AUDIO_CHUNK', (_event, payload: any) => {
+  if (!audioWorkerInstance || !payload) return;
+  
+  let buffer: Buffer | null = null;
+  let speaker: 'local' | 'remote' = 'local';
+
+  if (payload instanceof ArrayBuffer || ArrayBuffer.isView(payload) || Buffer.isBuffer(payload)) {
+    buffer = Buffer.from(payload as any);
+  } else if (payload.buffer) {
+    buffer = Buffer.from(payload.buffer);
+    if (payload.speaker) speaker = payload.speaker;
+  }
+
+  if (buffer) {
+    audioWorkerInstance.processAudioChunk(buffer, speaker);
+  }
+});
+
+
 
 let windows: Set<BrowserWindow> = new Set();
 let tray: Tray | null = null;
@@ -190,9 +210,23 @@ app.whenReady().then(async () => {
     audioWorkerInstance = new AudioWorkerController();
     realtimeBusInfo = await audioWorkerInstance.initialize(0);
     console.log(`[Main Process] 🟢 Realtime Bus listening on 127.0.0.1:${realtimeBusInfo.port} (Token: ${realtimeBusInfo.token.substring(0, 8)}...)`);
+
+    // Relay Whisper STT transcript events from main-process EventBus back to ALL renderer windows
+    const { eventBus: mainEventBus } = require('../shared/EventBus');
+    const relayTranscript = (evt: any, isFinal: boolean) => {
+      const payload = { text: evt.text, speaker: evt.speaker, isFinal, timestamp: evt.timestamp };
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('TRANSCRIPT_EVENT', payload);
+        }
+      });
+    };
+    mainEventBus.on('transcript.partial', (evt: any) => relayTranscript(evt, false));
+    mainEventBus.on('transcript.final', (evt: any) => relayTranscript(evt, true));
   } catch (err) {
     console.error('[Main Process] Failed to initialize Realtime Bus:', err);
   }
+
 
   setupTray();
   createWindow();

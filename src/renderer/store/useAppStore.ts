@@ -3,6 +3,47 @@ import { DesktopSource } from '../../sdk';
 
 export type SignalingMethod = 'auto' | 'firebase' | 'websocket' | 'webtorrent' | 'ipc' | 'memory';
 
+/**
+ * Merges newText into existingText by stripping overlapping word prefixes.
+ * Example: existingText = "The ocean", newText = "The ocean covers over 70 percent"
+ * Result = "The ocean covers over 70 percent" (not "The ocean The ocean covers over 70 percent")
+ */
+function mergeWithDeduplication(existingText: string, newText: string): string {
+  const existingTrimmed = existingText.trim();
+  const newTrimmed = newText.trim();
+
+  if (!existingTrimmed) return newTrimmed;
+  if (!newTrimmed) return existingTrimmed;
+
+  // Exact match or already contained at end
+  if (existingTrimmed.endsWith(newTrimmed)) return existingTrimmed;
+  if (newTrimmed.startsWith(existingTrimmed)) return newTrimmed;
+
+  // Find longest overlapping suffix of existingText matching prefix of newText
+  const existingWords = existingTrimmed.split(/\s+/);
+  const newWords = newTrimmed.split(/\s+/);
+
+  const maxOverlap = Math.min(existingWords.length, newWords.length);
+  let overlapCount = 0;
+
+  for (let len = maxOverlap; len > 0; len--) {
+    const existingSuffix = existingWords.slice(-len).join(' ').toLowerCase();
+    const newPrefix = newWords.slice(0, len).join(' ').toLowerCase();
+    if (existingSuffix === newPrefix) {
+      overlapCount = len;
+      break;
+    }
+  }
+
+  if (overlapCount > 0) {
+    const remainingNewWords = newWords.slice(overlapCount).join(' ');
+    return remainingNewWords ? `${existingTrimmed} ${remainingNewWords}` : existingTrimmed;
+  }
+
+  return `${existingTrimmed} ${newTrimmed}`;
+}
+
+
 export interface ModalConfig {
   isOpen: boolean;
   title?: string;
@@ -14,7 +55,18 @@ export interface ClipboardModalConfig {
   text: string;
 }
 
+export interface TranscriptParagraph {
+  id: string;
+  speaker: 'local' | 'remote';
+  text: string;
+  isFinal: boolean;
+  isLocked?: boolean;
+  timestamp: number;
+}
+
+
 export interface ChatMessage {
+
   id: string;
   sender: 'local' | 'remote';
   kind: 'text' | 'file' | 'clipboard';
@@ -53,6 +105,7 @@ export interface AppState {
   // Real-time Chat & Media Panel State
   isSidePanelOpen: boolean;
   chatMessages: ChatMessage[];
+  transcripts: TranscriptParagraph[];
   clipboardText: string;
 
   // Actions
@@ -76,9 +129,13 @@ export interface AppState {
   closeClipboardModal: () => void;
   resetSessionState: () => void;
 
-  // Chat Actions
+  // Chat & Transcript Actions
   setIsSidePanelOpen: (open: boolean) => void;
   addChatMessage: (msg: ChatMessage) => void;
+  addTranscriptParagraph: (p: TranscriptParagraph) => void;
+  lockCurrentParagraph: () => void;
+  clearTranscripts: () => void;
+
   updateFileMessageProgress: (id: string, progress: number) => void;
   setClipboardText: (text: string) => void;
 }
@@ -107,9 +164,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   modalConfig: { isOpen: false, title: 'Notice', message: '' },
   clipboardModalConfig: { isOpen: false, text: '' },
 
-  isSidePanelOpen: false,
+  isSidePanelOpen: true,
   chatMessages: [],
+  transcripts: [],
   clipboardText: '',
+
+
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setSources: (sources) => set({ sources }),
@@ -150,6 +210,45 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setIsSidePanelOpen: (isSidePanelOpen) => set({ isSidePanelOpen }),
   addChatMessage: (msg) => set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
+  addTranscriptParagraph: (p) =>
+    set((state) => {
+      const list = [...state.transcripts];
+      const newText = p.text ? p.text.trim() : '';
+      if (!newText) return state;
+
+      // Find existing paragraph for this speaker
+      const existingIdx = list.findIndex((item) => item.speaker === p.speaker);
+
+      if (existingIdx !== -1) {
+        // Update single paragraph in-place
+        const existingP = list[existingIdx];
+        const mergedText = mergeWithDeduplication(existingP.text, newText);
+        list[existingIdx] = {
+          ...existingP,
+          text: mergedText,
+          timestamp: p.timestamp,
+        };
+        return { transcripts: list };
+      } else {
+        // Create initial paragraph block for speaker
+        return { transcripts: [...list, { ...p, text: newText }] };
+      }
+    }),
+
+
+  lockCurrentParagraph: () =>
+    set((state) => {
+      const list = [...state.transcripts];
+      if (list.length > 0 && !list[list.length - 1].isLocked) {
+        list[list.length - 1] = { ...list[list.length - 1], isLocked: true };
+        return { transcripts: list };
+      }
+      return state;
+    }),
+
+
+
+  clearTranscripts: () => set({ transcripts: [] }),
   updateFileMessageProgress: (id, progress) =>
     set((state) => ({
       chatMessages: state.chatMessages.map((msg) =>
@@ -160,3 +259,4 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   setClipboardText: (clipboardText) => set({ clipboardText }),
 }));
+
