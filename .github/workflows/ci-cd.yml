@@ -33,6 +33,9 @@ jobs:
       - name: 🔍 TypeScript Typecheck
         run: npm run typecheck
 
+      - name: 📥 Download Whisper Binaries & Models
+        run: npm run setup:install
+
       - name: 🧪 Run Automated Test Suite
         run: npm test
 
