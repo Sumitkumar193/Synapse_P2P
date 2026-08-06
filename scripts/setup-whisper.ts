@@ -388,6 +388,7 @@ async function main() {
     console.log('\n==================================================');
     console.log('  🎉 WHISPER VENDOR SETUP COMPLETE!  ');
     console.log('==================================================\n');
+    process.exit(0);
   } catch (err) {
     console.error('[Whisper Setup] ❌ Error setting up Whisper:', err);
     process.exit(1);
