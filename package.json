@@ -4,12 +4,14 @@
   "description": "Production-grade Electron P2P Media SDK and Application",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc --emitDeclarationOnly && esbuild src/main/index.ts --bundle --platform=node --target=node20 --outfile=dist/main/index.js --external:electron && esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron && esbuild src/renderer/index.tsx --bundle --platform=browser --target=chrome120 --outfile=dist/renderer/index.js --jsx=automatic --define:process.env.NODE_ENV='\"production\"' && node -e \"require('fs').mkdirSync('dist/renderer', {recursive: true}); require('fs').copyFileSync('src/renderer/index.html', 'dist/renderer/index.html');\"",
+    "build": "tsx scripts/build.ts",
+    "setup:install": "npm install && tsx scripts/setup-whisper.ts",
+    "build:portable": "tsx scripts/build-portable.ts",
+    "build:installer": "tsx scripts/build-installer.ts",
     "dev": "cross-env NODE_ENV=development tsc --watch",
     "typecheck": "tsc --noEmit",
-    "start": "npm run build && cross-env NODE_ENV=development electron .",
+    "start": "cross-env NODE_ENV=development electron .",
     "test": "tsx test/index.ts",
-    "package:portable": "npm run build && npx -y electron-packager . P2PScreenShare --platform=win32 --arch=x64 --out=release --overwrite && node -e \"const fs = require('fs'); const { execSync } = require('child_process'); if (fs.existsSync('release/P2PScreenShare-Portable.zip')) fs.unlinkSync('release/P2PScreenShare-Portable.zip'); console.log('Zipping portable application package...'); execSync('powershell Compress-Archive -Path ./release/P2PScreenShare-win32-x64/* -DestinationPath ./release/P2PScreenShare-Portable.zip -Force', {stdio: 'inherit'}); console.log('✅ Created release/P2PScreenShare-Portable.zip');\"",
     "clean": "rimraf dist release"
   },
   "keywords": [
@@ -28,14 +30,45 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
     "@types/node": "^20.12.7",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "adm-zip": "^0.5.10",
     "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
     "rimraf": "^5.0.5",
     "tsx": "^4.7.2",
     "typescript": "^5.4.5"
+  },
+  "build": {
+    "appId": "com.synapse.p2pscreenshare",
+    "productName": "P2PScreenShare",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   }
 }

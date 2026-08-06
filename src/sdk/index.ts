@@ -215,6 +215,35 @@ export class P2PMediaSDK {
     return this.currentSession;
   }
 
+  public async publishMicrophone(): Promise<MediaStreamTrack | null> {
+    try {
+      const selectedMicId = typeof window !== 'undefined' ? localStorage.getItem('app_selected_mic') : null;
+      const micTrack = await this.mediaManager.captureMicrophone({
+        deviceId: selectedMicId || undefined,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      });
+      micTrack.contentHint = 'speech';
+
+      let activeStream = this.mediaManager.getActiveStream();
+      if (!activeStream) {
+        activeStream = new MediaStream([micTrack]);
+      } else if (!activeStream.getAudioTracks().includes(micTrack)) {
+        activeStream.addTrack(micTrack);
+      }
+
+      if (this.transport) {
+        this.transport.addStream(activeStream);
+      }
+      return micTrack;
+    } catch (err) {
+      this.logger.warn('Failed to publish microphone track:', err);
+      return null;
+    }
+  }
+
+
   public startSessionTimer(): void {
     this.cancelSessionTimer();
     const timeout = this.config.sessionTimeoutMs || 120000;
@@ -250,6 +279,15 @@ export class P2PMediaSDK {
       activeTrackerUrl: this.getActiveTrackerUrl(),
     };
   }
+
+  public getActiveSignalingProviderName(): string {
+    if (this.signalingProvider && typeof (this.signalingProvider as any).getActiveProviderName === 'function') {
+      return (this.signalingProvider as any).getActiveProviderName();
+    }
+    return 'Default Cascade';
+  }
+
+
 
   public async checkSignalingHealth(): Promise<Record<string, boolean>> {
     const health: Record<string, boolean> = {

@@ -6,6 +6,13 @@ import * as dotenv from 'dotenv';
 // Load environment variables from .env
 dotenv.config();
 
+// Single Instance Lock: Ensure only 1 instance of the application runs at any time
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  console.log('[Main Process] ⛔ Another instance of P2P Screen Share is already running. Exiting secondary process...');
+  app.quit();
+}
+
 // Suppress Chromium internal C++ log noise (WGC static frame timeouts)
 app.commandLine.appendSwitch('log-level', '3');
 app.commandLine.appendSwitch('disable-features', 'WGCWindowCapturer,WGCDisplayCapturer,WgcCapturer');
@@ -14,6 +21,13 @@ app.commandLine.appendSwitch('enable-features', 'GDIWindowCapturer');
 import { setupDesktopCapturerIPC } from './ipc/desktopCapturerHandler';
 import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
+import { AudioWorkerController } from '../workers/audioWorker';
+import { setupIPCProxyHandlers } from './ipcProxy';
+import { setupSettingsIPC, SettingsManager } from './settingsManager';
+
+let audioWorkerInstance: AudioWorkerController | null = null;
+let realtimeBusInfo: { port: number; token: string } | null = null;
+
 
 ipcMain.handle('READ_CLIPBOARD', () => {
   try {
@@ -28,6 +42,31 @@ ipcMain.on('WRITE_CLIPBOARD', (_event, text: string) => {
     clipboard.writeText(text);
   } catch {}
 });
+
+ipcMain.handle('GET_REALTIME_BUS_INFO', () => {
+  return realtimeBusInfo;
+});
+
+// Receive 16kHz Int16 PCM audio chunks from renderer AudioStreamer (local mic or remote speaker), feed to Whisper STT
+ipcMain.on('AUDIO_CHUNK', (_event, payload: any) => {
+  if (!audioWorkerInstance || !payload) return;
+  
+  let buffer: Buffer | null = null;
+  let speaker: 'local' | 'remote' = 'local';
+
+  if (payload instanceof ArrayBuffer || ArrayBuffer.isView(payload) || Buffer.isBuffer(payload)) {
+    buffer = Buffer.from(payload as any);
+  } else if (payload.buffer) {
+    buffer = Buffer.from(payload.buffer);
+    if (payload.speaker) speaker = payload.speaker;
+  }
+
+  if (buffer) {
+    audioWorkerInstance.processAudioChunk(buffer, speaker);
+  }
+});
+
+
 
 let windows: Set<BrowserWindow> = new Set();
 let tray: Tray | null = null;
@@ -160,16 +199,73 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setupDesktopCapturerIPC();
   setupSignalingIPC();
+  setupIPCProxyHandlers();
+  setupSettingsIPC();
   setupWindowIPC(
     () => BrowserWindow.getFocusedWindow() || (windows.size > 0 ? Array.from(windows)[0] : null),
     () => createWindow()
   );
 
+  // Auto-approve permissions for media devices and speaker selection
+  const { session } = require('electron');
+  session.defaultSession.setPermissionCheckHandler((_webContents: any, permission: string) => {
+    if (permission === 'media' || permission === 'speaker-selection') return true;
+    return true;
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents: any, permission: string, callback: any) => {
+    if (permission === 'media' || permission === 'speaker-selection') return callback(true);
+    callback(true);
+  });
+
+  // Initialize Realtime Bus & Audio Worker
+  try {
+    // Read user STT preferences and forward to Whisper engine
+    const settingsManager = SettingsManager.getInstance();
+    const settings = settingsManager.getSettings();
+    audioWorkerInstance = new AudioWorkerController(
+      undefined,
+      settings.whisperProvider,
+      {
+        modelName: settings.localWhisperModel,
+        threads: settings.whisperThreads,
+      },
+    );
+    realtimeBusInfo = await audioWorkerInstance.initialize(0);
+    console.log(`[Main Process] 🟢 Realtime Bus listening on 127.0.0.1:${realtimeBusInfo.port} (Token: ${realtimeBusInfo.token.substring(0, 8)}...)`);
+
+    // Relay Whisper STT transcript events from main-process EventBus back to ALL renderer windows
+    const { eventBus: mainEventBus } = require('../shared/EventBus');
+    const relayTranscript = (evt: any, isFinal: boolean) => {
+      const payload = { text: evt.text, speaker: evt.speaker, isFinal, timestamp: evt.timestamp };
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('TRANSCRIPT_EVENT', payload);
+        }
+      });
+    };
+    mainEventBus.on('transcript.partial', (evt: any) => relayTranscript(evt, false));
+    mainEventBus.on('transcript.final', (evt: any) => relayTranscript(evt, true));
+  } catch (err) {
+    console.error('[Main Process] Failed to initialize Realtime Bus:', err);
+  }
+
+
   setupTray();
   createWindow();
+
+  app.on('second-instance', () => {
+    // Focus main window if user attempts to launch second instance
+    windows.forEach((win) => {
+      if (!win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      }
+    });
+  });
 
   app.on('activate', () => {
     if (windows.size === 0) {
@@ -177,6 +273,7 @@ app.whenReady().then(() => {
     }
   });
 });
+
 
 app.on('before-quit', () => {
   isQuitting = true;

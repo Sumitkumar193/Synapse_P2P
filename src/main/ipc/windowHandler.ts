@@ -21,8 +21,4 @@ export function setupWindowIPC(getWindow: () => BrowserWindow | null, openNewWin
     const win = getWindow();
     if (win) win.close();
   });
-
-  ipcMain.on('WINDOW_OPEN_NEW', () => {
-    openNewWindow();
-  });
 }

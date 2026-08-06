@@ -11,22 +11,46 @@ import {
 import { TitleBar } from './components/TitleBar';
 import { HostCard } from './components/HostCard';
 import { ViewerCard } from './components/ViewerCard';
+import { AiAssistantCard } from './components/AiAssistantCard';
 import { StreamView } from './components/StreamView';
 import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
 import { ClipboardModal } from './components/ClipboardModal';
+import { SettingsPanelComponent } from './components/SettingsPanel';
+import { ClosedCaptionOverlay } from './components/ClosedCaptionOverlay';
+import { SessionEventBridge } from '../shared/SessionEventBridge';
+
+import { eventBus } from '../shared/EventBus';
+import { localAudioStreamer, remoteAudioStreamer, audioStreamer } from './utils/AudioStreamer';
+
 import { SignalingMethod, ChatMessage, useAppStore } from './store/useAppStore';
+
+
+
 
 export const App: React.FC = () => {
   const sdkRef = useRef<P2PMediaSDK | null>(null);
   const timerRef = useRef<any>(null);
   const lastCopiedRef = useRef<string>('');
+  const settingsRef = useRef<SettingsPanelComponent | null>(null);
+
+  useEffect(() => {
+    const container = document.getElementById('settingsContainer');
+    if (container) {
+      const panel = new SettingsPanelComponent();
+      panel.mount(container);
+      panel.loadCurrentSettings();
+      settingsRef.current = panel;
+    }
+  }, []);
+
 
   // Zustand State Selectors
   const activeTab = useAppStore((state) => state.activeTab);
   const sources = useAppStore((state) => state.sources);
   const selectedSourceId = useAppStore((state) => state.selectedSourceId);
   const signalingMethod = useAppStore((state) => state.signalingMethod);
+  const enableHosting = useAppStore((state) => state.enableHosting);
   const isHosting = useAppStore((state) => state.isHosting);
   const isViewing = useAppStore((state) => state.isViewing);
   const sessionCode = useAppStore((state) => state.sessionCode);
@@ -137,7 +161,13 @@ export const App: React.FC = () => {
         // Wire up Session Data, File Transfer & Clipboard listeners
         const currentSession = sdk.session();
         if (currentSession) {
+          if ((window as any).activeBridge) {
+            (window as any).activeBridge.destroy();
+          }
+          (window as any).activeBridge = new SessionEventBridge(currentSession);
+
           currentSession.data.onMessage((msg) => {
+
             try {
               const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
               if (data && data.type === 'app-chat' && data.text) {
@@ -241,12 +271,52 @@ export const App: React.FC = () => {
       }
     }, 1000);
 
+    // Automatic Closed Caption (CC) Chat Stream Integration
+    const unsubCcLocal = eventBus.on('cc.chat.local', (evt: any) => {
+      addChatMessage({
+        id: Date.now().toString(),
+        sender: 'local',
+        kind: 'text',
+        text: evt.text,
+        timestamp: evt.timestamp || Date.now(),
+      });
+    });
+
+    const unsubCcRemote = eventBus.on('cc.chat.remote', (evt: any) => {
+      addChatMessage({
+        id: Date.now().toString(),
+        sender: 'remote',
+        kind: 'text',
+        text: evt.text,
+        timestamp: evt.timestamp || Date.now(),
+      });
+    });
+
     return () => {
       stopTimer();
+      unsubCcLocal();
+      unsubCcRemote();
       clearInterval(clipboardMonitorInterval);
       sdk.disconnect().catch(console.error);
     };
   }, [signalingMethod]);
+
+  // SPEAKER-FIRST PRIORITY: Focus 100% on incoming remote speaker audio for Whisper STT
+  useEffect(() => {
+    if (remoteStream && remoteStream.getAudioTracks().length > 0) {
+      console.log('[Speaker-First Mode] 🔊 Prioritizing remote speaker audio for Whisper STT. Muting local mic STT.');
+      localAudioStreamer.stop();
+      remoteAudioStreamer.start(remoteStream, 'remote');
+    } else {
+      remoteAudioStreamer.stop();
+    }
+    return () => {
+      remoteAudioStreamer.stop();
+    };
+  }, [remoteStream]);
+
+
+
 
   const loadDesktopSources = async (sdkInstance?: P2PMediaSDK) => {
     const sdk = sdkInstance || sdkRef.current;
@@ -318,10 +388,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleOpen2ndWin = () => {
-    window.electronAPI?.openNewWindow?.();
-  };
-
   const handleStartSharing = async (sysAudio: boolean, micAudio: boolean) => {
     const sdk = sdkRef.current;
     if (!sdk) return;
@@ -358,10 +424,19 @@ export const App: React.FC = () => {
     });
 
     setLocalStream(stream);
+
+    useAppStore.getState().setIsAiHelperActive(true);
+    if (!remoteStream || remoteStream.getAudioTracks().length === 0) {
+      console.log('[Host Mode] 🎙️ No active remote speaker stream. Starting local mic streamer...');
+      localAudioStreamer.start(stream, 'local');
+    }
   };
+
 
   const handleStopSharing = async () => {
     stopTimer();
+    audioStreamer.stop();
+    useAppStore.getState().setIsAiHelperActive(false);
     resetSessionState();
 
     const sdk = sdkRef.current;
@@ -371,6 +446,7 @@ export const App: React.FC = () => {
 
     loadDesktopSources();
   };
+
 
   const handleJoinSession = async (code: string) => {
     const sdk = sdkRef.current;
@@ -494,49 +570,41 @@ export const App: React.FC = () => {
         chatBadgeCount={chatMessages.length}
         isChatOpen={isSidePanelOpen}
         onToggleChat={() => setIsSidePanelOpen(!isSidePanelOpen)}
+        onOpenSettings={() => settingsRef.current?.toggle()}
         onSignalingMethodChange={setSignalingMethod}
-        onOpen2ndWin={handleOpen2ndWin}
       />
+
 
       <div className="app-body">
         <div className="app-main-content">
           {!isViewing ? (
             <div className="compact-container">
-              {!isHosting && (
-                <div className="nav-tabs">
-                  <button
-                    className={`tab-btn ${activeTab === 'share' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('share')}
-                  >
-                    <span>📺</span> Share Screen
-                  </button>
-                  <button
-                    className={`tab-btn ${activeTab === 'join' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('join')}
-                  >
-                    <span>🔗</span> Join Remote Screen
-                  </button>
-                </div>
-              )}
+              <div className="dual-dashboard-grid">
+                {/* 1st Card: AI & Speech Assistant Card */}
+                <AiAssistantCard onOpenDrawer={() => setIsSidePanelOpen(true)} />
 
-              {activeTab === 'share' || isHosting ? (
-                <HostCard
-                  sources={sources}
-                  selectedSourceId={selectedSourceId}
-                  onSelectSource={(id) => setSelectedSourceId(id)}
-                  onRefreshSources={() => loadDesktopSources()}
-                  onStartSharing={handleStartSharing}
-                  onStopSharing={handleStopSharing}
-                  isHosting={isHosting}
-                  isConnected={statusState === 'connected'}
-                  sessionCode={sessionCode}
-                  remainingSeconds={remainingSeconds}
-                  isExpired={isExpired}
-                />
-              ) : (
-                <ViewerCard onJoinSession={handleJoinSession} />
-              )}
+                {/* 2nd Card: Host Screen Share Card (if enableHosting === true) */}
+                {enableHosting && (
+                  <HostCard
+                    sources={sources}
+                    selectedSourceId={selectedSourceId}
+                    onSelectSource={(id) => setSelectedSourceId(id)}
+                    onRefreshSources={() => loadDesktopSources()}
+                    onStartSharing={handleStartSharing}
+                    onStopSharing={handleStopSharing}
+                    isHosting={isHosting}
+                    isConnected={statusState === 'connected'}
+                    sessionCode={sessionCode}
+                    remainingSeconds={remainingSeconds}
+                    isExpired={isExpired}
+                  />
+                )}
+
+                {/* 3rd Card: Join Remote Screen Card (if not hosting) */}
+                {!isHosting && <ViewerCard onJoinSession={handleJoinSession} />}
+              </div>
             </div>
+
           ) : (
             <StreamView
               remoteStream={remoteStream}
@@ -560,7 +628,10 @@ export const App: React.FC = () => {
         )}
       </div>
 
+      <ClosedCaptionOverlay />
+
       <NotificationModal
+
         isOpen={modalConfig.isOpen}
         title={modalConfig.title}
         message={modalConfig.message}
@@ -572,6 +643,9 @@ export const App: React.FC = () => {
         text={clipboardModalConfig.text}
         onClose={closeClipboardModal}
       />
+
+      <div id="settingsContainer"></div>
     </>
   );
+
 };

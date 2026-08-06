@@ -48,10 +48,12 @@ export class FallbackSignalingProvider implements ISignalingProvider {
         this.logger.info(`🔍 Probing provider [${item.name}] for active Host in room ${roomId}...`);
         await item.provider.connect(roomId);
 
+        const probedMessages: SignalingMessage[] = [];
         let offerDiscovered = false;
 
         // Temporary offer listener for room probe
         const probeHandler: SignalingMessageHandler = (msg: SignalingMessage) => {
+          probedMessages.push(msg);
           if (msg.type === 'offer' || msg.type === 'peer-joined') {
             offerDiscovered = true;
           }
@@ -73,8 +75,14 @@ export class FallbackSignalingProvider implements ISignalingProvider {
           this.activeProvider = item;
           this.messageHandlers.forEach((h) => item.provider.onMessage(h));
           this.logger.info(`🟢 🎯 [Joiner Mode] Found active Host on signaling provider [${item.name}]! Locking connection.`);
+
+          // Replay probed messages (such as WebRTC offer) to WebRTCTransport listeners!
+          for (const msg of probedMessages) {
+            this.messageHandlers.forEach((h) => h(msg));
+          }
           return;
         }
+
 
         // No Host response on this provider within timeout -> cleanup and probe next provider
         this.logger.info(`⏱️ No Host response on [${item.name}] after ${PROBE_TIMEOUT_MS}ms. Probing next provider...`);

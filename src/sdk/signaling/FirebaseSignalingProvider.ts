@@ -47,7 +47,8 @@ export class FirebaseSignalingProvider implements ISignalingProvider {
         if (data.type && data.senderId) {
           const msg = data as SignalingMessage;
           const isStale = msg.timestamp && (Date.now() - msg.timestamp > STALE_TTL_MS);
-          const msgKey = `${msg.type}_${msg.senderId}_${msg.timestamp}`;
+          const payloadSnippet = typeof msg.payload === 'object' ? JSON.stringify(msg.payload).slice(0, 30) : msg.payload || '';
+          const msgKey = `${msg.type}_${msg.senderId}_${msg.targetId || ''}_${msg.timestamp}_${payloadSnippet}`;
           if (!isStale && msg.senderId !== this.currentPeerId && !this.processedMessageKeys.has(msgKey)) {
             this.processedMessageKeys.add(msgKey);
             this.logger.info(`📩 Received Firebase SSE message [type=${msg.type}] from peer ${msg.senderId}`);
@@ -60,7 +61,8 @@ export class FirebaseSignalingProvider implements ISignalingProvider {
             if (item && item.type && item.senderId) {
               const msg = item as SignalingMessage;
               const isStale = msg.timestamp && (Date.now() - msg.timestamp > STALE_TTL_MS);
-              const msgKey = `${msg.type}_${msg.senderId}_${msg.timestamp}`;
+              const payloadSnippet = typeof msg.payload === 'object' ? JSON.stringify(msg.payload).slice(0, 30) : msg.payload || '';
+              const msgKey = `${msg.type}_${msg.senderId}_${msg.targetId || ''}_${msg.timestamp}_${payloadSnippet}`;
               if (!isStale && msg.senderId !== this.currentPeerId && !this.processedMessageKeys.has(msgKey)) {
                 this.processedMessageKeys.add(msgKey);
                 this.logger.info(`📩 Received Firebase snapshot message [type=${msg.type}] from peer ${msg.senderId}`);
@@ -120,7 +122,8 @@ export class FirebaseSignalingProvider implements ISignalingProvider {
                 if (item && item.type && item.senderId) {
                   const msg = item as SignalingMessage;
                   const isStale = msg.timestamp && (Date.now() - msg.timestamp > 30000);
-                  const msgKey = `${msg.type}_${msg.senderId}_${msg.timestamp}`;
+                  const payloadSnippet = typeof msg.payload === 'object' ? JSON.stringify(msg.payload).slice(0, 30) : msg.payload || '';
+                  const msgKey = `${msg.type}_${msg.senderId}_${msg.targetId || ''}_${msg.timestamp}_${payloadSnippet}`;
                   if (!isStale && msg.senderId !== this.currentPeerId && !this.processedMessageKeys.has(msgKey)) {
                     this.processedMessageKeys.add(msgKey);
                     this.logger.info(`📩 Received Firebase polled message [type=${msg.type}] from peer ${msg.senderId}`);
@@ -136,6 +139,7 @@ export class FirebaseSignalingProvider implements ISignalingProvider {
       }
     }, 1500);
   }
+
 
   public async send(message: SignalingMessage): Promise<void> {
     if (!this.currentRoomId) return;
