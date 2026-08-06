@@ -21,6 +21,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   const addTranscriptParagraph = useAppStore((state) => state.addTranscriptParagraph);
   const lockCurrentParagraph = useAppStore((state) => state.lockCurrentParagraph);
   const clearTranscripts = useAppStore((state) => state.clearTranscripts);
+  const selectedMicId = useAppStore((state) => state.selectedMicId);
 
 
   const [activeTab, setActiveTab] = useState<'transcripts' | 'chat'>('transcripts');
@@ -175,8 +176,22 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
         // 1. Microphone Audio (User Voice)
         try {
-          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          micStream.getAudioTracks().forEach((track) => audioTracks.push(track));
+          const micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              googEchoCancellation: true,
+              googAutoGainControl: true,
+              googNoiseSuppression: true,
+              googHighpassFilter: true,
+            } as any
+          });
+          micStream.getAudioTracks().forEach((track) => {
+            console.log(`[AI Drawer] 🎤 Captured Microphone: ${track.label}`);
+            audioTracks.push(track);
+          });
         } catch (err) {
           console.warn('[AI Drawer] Mic capture skipped or denied:', err);
         }

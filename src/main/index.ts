@@ -23,7 +23,7 @@ import { setupWindowIPC } from './ipc/windowHandler';
 import { setupSignalingIPC } from './ipc/signalingHandler';
 import { AudioWorkerController } from '../workers/audioWorker';
 import { setupIPCProxyHandlers } from './ipcProxy';
-import { setupSettingsIPC } from './settingsManager';
+import { setupSettingsIPC, SettingsManager } from './settingsManager';
 
 let audioWorkerInstance: AudioWorkerController | null = null;
 let realtimeBusInfo: { port: number; token: string } | null = null;
@@ -209,11 +209,30 @@ app.whenReady().then(async () => {
     () => createWindow()
   );
 
-
+  // Auto-approve permissions for media devices and speaker selection
+  const { session } = require('electron');
+  session.defaultSession.setPermissionCheckHandler((_webContents: any, permission: string) => {
+    if (permission === 'media' || permission === 'speaker-selection') return true;
+    return true;
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents: any, permission: string, callback: any) => {
+    if (permission === 'media' || permission === 'speaker-selection') return callback(true);
+    callback(true);
+  });
 
   // Initialize Realtime Bus & Audio Worker
   try {
-    audioWorkerInstance = new AudioWorkerController();
+    // Read user STT preferences and forward to Whisper engine
+    const settingsManager = SettingsManager.getInstance();
+    const settings = settingsManager.getSettings();
+    audioWorkerInstance = new AudioWorkerController(
+      undefined,
+      settings.whisperProvider,
+      {
+        modelName: settings.localWhisperModel,
+        threads: settings.whisperThreads,
+      },
+    );
     realtimeBusInfo = await audioWorkerInstance.initialize(0);
     console.log(`[Main Process] 🟢 Realtime Bus listening on 127.0.0.1:${realtimeBusInfo.port} (Token: ${realtimeBusInfo.token.substring(0, 8)}...)`);
 

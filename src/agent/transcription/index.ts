@@ -1,5 +1,5 @@
 import { ITranscriptionProvider } from './TranscriptionProvider';
-import { WhisperTranscriptionProvider } from './WhisperTranscriptionProvider';
+import { WhisperTranscriptionProvider, WhisperProviderConfig } from './WhisperTranscriptionProvider';
 import { OpenAIAudioTranscriptionProvider } from './OpenAIAudioTranscriptionProvider';
 
 export * from './TranscriptionProvider';
@@ -11,10 +11,10 @@ export * from './OpenAIAudioTranscriptionProvider';
  * WHISPER_PROVIDER='local' (default) => local whisper.cpp / whisper-cli C++ binary.
  * WHISPER_PROVIDER='openai'           => Cloud OpenAI Audio REST API.
  */
-export function createTranscriptionProvider(providerType?: 'local' | 'openai'): ITranscriptionProvider {
+export function createTranscriptionProvider(providerType?: 'local' | 'openai', config?: WhisperProviderConfig): ITranscriptionProvider {
   const selected = providerType || (process.env.WHISPER_PROVIDER as any) || 'local';
   if (selected === 'openai') {
     return new OpenAIAudioTranscriptionProvider();
   }
-  return new WhisperTranscriptionProvider();
+  return new WhisperTranscriptionProvider(config);
 }

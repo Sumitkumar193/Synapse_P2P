@@ -93,7 +93,7 @@ export class AgentWorkerController {
           },
           {
             role: 'user',
-            content: payload.text,
+            content: `[${payload.speaker.toUpperCase()} SPEAKER]: ${payload.text}`,
           },
         ]);
 

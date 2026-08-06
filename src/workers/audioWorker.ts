@@ -1,6 +1,7 @@
 import { RealtimeBus } from '../realtime/RealtimeBus';
 import { RingBuffer } from '../realtime/RingBuffer';
 import { ITranscriptionProvider, createTranscriptionProvider } from '../agent/transcription';
+import { WhisperProviderConfig } from '../agent/transcription/WhisperTranscriptionProvider';
 
 export class AudioWorkerController {
   public readonly realtimeBus: RealtimeBus;
@@ -8,10 +9,10 @@ export class AudioWorkerController {
   public readonly transcriptionProvider: ITranscriptionProvider;
   private isProcessing = false;
 
-  constructor(sessionToken?: string, providerType?: 'local' | 'openai') {
+  constructor(sessionToken?: string, providerType?: 'local' | 'openai', whisperConfig?: WhisperProviderConfig) {
     this.realtimeBus = new RealtimeBus(sessionToken);
     this.ringBuffer = new RingBuffer(1024 * 1024); // 1MB PCM ring buffer
-    this.transcriptionProvider = createTranscriptionProvider(providerType);
+    this.transcriptionProvider = createTranscriptionProvider(providerType, whisperConfig);
     this.transcriptionProvider.start().catch(console.error);
 
     // Forward transcript events to RealtimeBus /transcript channel

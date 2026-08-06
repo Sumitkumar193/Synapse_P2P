@@ -32,8 +32,12 @@ function findProjectRoot(): string {
 
 function resolveCrossPlatformServerBinary(projectRoot: string): string | null {
   const isWin = process.platform === 'win32';
-  const serverNames = isWin ? ['whisper-server.exe', 'whisper-server'] : ['whisper-server'];
+  const serverNames = isWin
+    ? ['whisper-server.exe', 'whisper-server', 'server.exe', 'server']
+    : ['whisper-server', 'server'];
   const searchSubdirs = [
+    path.join('vendor', 'whisper', 'bin'),
+    path.join('vendor', 'whisper'),
     path.join('assets', 'whisper', 'Release'),
     path.join('assets', 'whisper', process.platform),
     path.join('assets', 'whisper', 'bin'),
@@ -59,10 +63,12 @@ function resolveCrossPlatformBinary(projectRoot: string, userExecPath?: string):
 
   const isWin = process.platform === 'win32';
   const binNames = isWin
-    ? ['whisper-cli.exe', 'whisper-cli', 'main.exe', 'main']
-    : ['whisper-cli', 'main', 'whisper'];
+    ? ['whisper-cli.exe', 'whisper-cli']
+    : ['whisper-cli', 'whisper'];
 
   const searchSubdirs = [
+    path.join('vendor', 'whisper', 'bin'),
+    path.join('vendor', 'whisper'),
     path.join('assets', 'whisper', 'Release'),
     path.join('assets', 'whisper', process.platform),
     path.join('assets', 'whisper', 'bin'),
@@ -96,44 +102,55 @@ function resolveCrossPlatformBinary(projectRoot: string, userExecPath?: string):
 }
 
 function resolveCrossPlatformModel(projectRoot: string, modelName: string, userModelPath?: string): string | undefined {
+  // 1. Explicit argument path
   if (userModelPath && fs.existsSync(userModelPath)) {
     return userModelPath;
   }
 
-  const candidateNames = [
-    `ggml-${modelName}.bin`,
-    `ggml-${modelName}.en.bin`,
-    'ggml-tiny.en.bin',
-    'ggml-base.en.bin',
-    'ggml-small.en.bin',
-  ];
-
-  const searchSubdirs = [
-    path.join('assets', 'whisper'),
-    path.join('assets', 'whisper', 'models'),
-    path.join('models'),
-    path.join('resources', 'assets', 'whisper'),
-  ];
-
-  for (const subdir of searchSubdirs) {
-    for (const name of candidateNames) {
-      const fullPath = path.join(projectRoot, subdir, name);
-      if (fs.existsSync(fullPath)) {
-        return fullPath;
-      }
+  // 2. Optional Environment Variable override (if file exists)
+  if (process.env.WHISPER_MODEL) {
+    const envPath = path.isAbsolute(process.env.WHISPER_MODEL)
+      ? process.env.WHISPER_MODEL
+      : path.join(projectRoot, process.env.WHISPER_MODEL);
+    if (fs.existsSync(envPath)) {
+      return envPath;
     }
   }
 
-  // Fallback: any .bin model file in assets/whisper
-  const whisperAssetDir = path.join(projectRoot, 'assets', 'whisper');
-  if (fs.existsSync(whisperAssetDir)) {
+  // 3. Primary: Search vendor/whisper/models for the requested model name
+  const vendorModelsDir = path.join(projectRoot, 'vendor', 'whisper', 'models');
+  if (fs.existsSync(vendorModelsDir)) {
     try {
-      const files = fs.readdirSync(whisperAssetDir);
+      const files = fs.readdirSync(vendorModelsDir);
+      // Prefer exact match for the requested model name
+      const exactMatch = files.find((f) => f.includes(`ggml-${modelName}`) && f.endsWith('.bin'));
+      if (exactMatch) {
+        return path.join(vendorModelsDir, exactMatch);
+      }
+      // Fallback to first available .bin if requested model not found
       const binFile = files.find((f) => f.endsWith('.bin'));
       if (binFile) {
-        return path.join(whisperAssetDir, binFile);
+        return path.join(vendorModelsDir, binFile);
       }
     } catch {}
+  }
+
+  // 4. Secondary: Search vendor/whisper root for any .bin model file
+  const vendorDir = path.join(projectRoot, 'vendor', 'whisper');
+  if (fs.existsSync(vendorDir)) {
+    try {
+      const files = fs.readdirSync(vendorDir);
+      const binFile = files.find((f) => f.endsWith('.bin'));
+      if (binFile) {
+        return path.join(vendorDir, binFile);
+      }
+    } catch {}
+  }
+
+  // 5. Default Fallback: repository tiny model template asset
+  const tinyAssetPath = path.join(projectRoot, 'assets', 'whisper', 'ggml-tiny.en.bin');
+  if (fs.existsSync(tinyAssetPath)) {
+    return tinyAssetPath;
   }
 
   return undefined;
@@ -219,7 +236,8 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
           '-m', this.config.modelPath,
           '--port', String(this.serverPort),
           '-t', String(this.threads),
-          '-fa', // Enable Flash Attention (C++ SIMD matrix multiplication acceleration)
+          '--beam-size', '1',
+          '--best-of', '1',
         ];
         if (this.device === 'gpu' || this.device === 'auto') {
           args.push('-ngl', '99');
@@ -241,8 +259,8 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
     for (let i = 0; i < maxAttempts; i++) {
       if (!this.serverProcess || !this.active) return false;
       const isAlive = await new Promise<boolean>((resolve) => {
-        const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: 200 }, (res) => {
-          resolve(res.statusCode === 200);
+        const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 200 }, (res) => {
+          resolve(res.statusCode === 200 || res.statusCode === 302 || res.statusCode === 405);
         });
         req.on('error', () => resolve(false));
         req.on('timeout', () => { req.destroy(); resolve(false); });
@@ -388,8 +406,9 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
           this.speechLength += step.length;
           this.silenceSampleCount = 0;
 
-          // Auto-flush when speech segment reaches 3.5s (~112,000 bytes)
-          if (this.speechLength >= 112000) {
+          // Auto-flush when speech segment reaches 6.0s (~192,000 bytes)
+          // 6.0s prevents chopping an active sentence in half (which causes ignored text/partial transcriptions)
+          if (this.speechLength >= 192000) {
             const res = await this.flushSpeechBuffer(speaker);
             if (res) lastResult = res;
           }
@@ -399,8 +418,8 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
 
           if (this.speechLength > 0) {
             this.silenceSampleCount++;
-            // Flush utterance after 2 consecutive silent steps (~1.0s pause)
-            if (this.silenceSampleCount >= 2 && this.speechLength >= 16000) {
+            // Flush utterance after 1 consecutive silent step (~0.5s pause) for real-time feel
+            if (this.silenceSampleCount >= 1 && this.speechLength >= 16000) {
               const res = await this.flushSpeechBuffer(speaker);
               if (res) lastResult = res;
             }
@@ -497,6 +516,7 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
     // Fast Path: If persistent whisper-server daemon is warm in RAM, post audio via 0ms HTTP POST
     if (this.isServerReady && this.serverProcess) {
       try {
+        console.log('[WhisperSTT] 🚀 Using fast-path (whisper-server)');
         const serverText = await this.postWavToServer(this.serverPort, wavBuffer);
         if (serverText && serverText.trim().length > 0) {
           return serverText.trim();
@@ -524,8 +544,9 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
         '-m', this.config.modelPath || `models/ggml-${this.modelName}.bin`,
         '-f', tempWavPath,
         '-t', String(this.threads),
-        '-fa', // Flash Attention parity in CLI fallback path
         '-nt', // no timestamps in text output
+        '-bs', '1', // greedy decoding: beam size 1 (default 5 is too slow for live captioning)
+        '-bo', '1', // greedy decoding: best of 1 (default 5 causes 5x slowdown)
       ];
 
       // Pass GPU offload layers if GPU / AUTO target is requested
@@ -537,14 +558,19 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
         args.push('-l', this.config.language);
       }
 
+      console.log(`[WhisperSTT] 🐢 Using fallback path (whisper-cli) [Threads: ${this.threads}]`);
       const binDir = path.dirname(this.executablePath);
       const stdout = await new Promise<string>((resolve) => {
-        execFile(this.executablePath, args, { cwd: binDir, timeout: 10000 }, (err, out, stderr) => {
+        execFile(this.executablePath, args, { cwd: binDir, timeout: 30000, maxBuffer: 20 * 1024 * 1024 }, (err, out, stderr) => {
           if (out && out.trim().length > 0) {
             resolve(out);
           } else if (err) {
-            console.warn('[WhisperSTT] whisper-cli execution warning:', err.message);
-            resolve('');
+            if (!err.killed && out && out.trim().length > 0) {
+              resolve(out);
+            } else {
+              console.warn('[WhisperSTT] whisper-cli execution notice:', err.message);
+              resolve(out || '');
+            }
           } else {
             resolve(out || '');
           }

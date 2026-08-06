@@ -20,6 +20,9 @@ build/
 *.zip
 *.exe
 
+# Vendor dependencies & local downloads
+vendor/
+
 # OS & IDE files
 .DS_Store
 Thumbs.db

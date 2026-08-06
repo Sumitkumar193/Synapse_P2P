@@ -217,7 +217,9 @@ export class P2PMediaSDK {
 
   public async publishMicrophone(): Promise<MediaStreamTrack | null> {
     try {
+      const selectedMicId = typeof window !== 'undefined' ? localStorage.getItem('app_selected_mic') : null;
       const micTrack = await this.mediaManager.captureMicrophone({
+        deviceId: selectedMicId || undefined,
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,

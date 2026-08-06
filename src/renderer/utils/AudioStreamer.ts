@@ -7,16 +7,23 @@ import { eventBus } from '../../shared/EventBus';
  */
 export class AudioStreamer {
   private audioCtx: AudioContext | null = null;
-  private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
+  private activeSources: MediaStreamAudioSourceNode[] = [];
   private workletNode: AudioWorkletNode | null = null;
   private silentGain: GainNode | null = null;
   private static transcriptListenerAttached = false;
 
-  public async start(stream: MediaStream, speaker: 'local' | 'remote' = 'local'): Promise<void> {
+  public async start(stream: MediaStream | MediaStream[], speaker: 'local' | 'remote' = 'local'): Promise<void> {
     this.stop();
 
     try {
-      const audioTracks = stream.getAudioTracks();
+      const streams = Array.isArray(stream) ? stream : [stream];
+      const audioTracks: MediaStreamTrack[] = [];
+      streams.forEach((s) => {
+        if (s && s.getAudioTracks) {
+          s.getAudioTracks().forEach((track) => audioTracks.push(track));
+        }
+      });
+
       if (audioTracks.length === 0) {
         console.warn(`[AudioStreamer] No audio tracks found for ${speaker} stream.`);
         return;
@@ -32,16 +39,8 @@ export class AudioStreamer {
         this.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
 
-      // Disconnect previous MediaStreamSource if present to avoid ghost track listening
-      if (this.mediaStreamSource) {
-        try {
-          this.mediaStreamSource.disconnect();
-        } catch {}
-        this.mediaStreamSource = null;
-      }
-
-      // Create new MediaStreamSource for the passed MediaStream (mixes all mic & system speaker tracks)
-      this.mediaStreamSource = this.audioCtx.createMediaStreamSource(stream);
+      // Disconnect previous MediaStreamSource nodes if present to avoid ghost track listening
+      this.disconnectActiveSources();
 
       // Modern AudioWorklet Node (runs off main thread in real-time audio thread)
       if (this.audioCtx.audioWorklet) {
@@ -52,23 +51,31 @@ export class AudioStreamer {
                 super();
                 this.ringBuffer = new Int16Array(4096);
                 this.writeIdx = 0;
-                this.step = Math.max(1, sampleRate / 16000);
               }
               process(inputs) {
                 const input = inputs[0];
                 if (input && input.length > 0) {
-                  const channelData = input[0];
-                  const stepSize = Math.max(1, Math.round(this.step));
-                  for (let i = 0; i < channelData.length; i += this.step) {
+                  const numChannels = input.length;
+                  const frameCount = input[0].length;
+                  const step = Math.max(1, sampleRate / 16000);
+                  
+                  for (let i = 0; i < frameCount; i += step) {
                     let sum = 0;
                     let count = 0;
                     const startIdx = Math.floor(i);
-                    const endIdx = Math.min(channelData.length, startIdx + stepSize);
-                    for (let j = startIdx; j < endIdx; j++) {
-                      sum += channelData[j];
-                      count++;
+                    const endIdx = Math.min(frameCount, Math.max(startIdx + 1, Math.floor(i + step)));
+                    
+                    for (let ch = 0; ch < numChannels; ch++) {
+                      const channelData = input[ch];
+                      if (channelData) {
+                        for (let j = startIdx; j < endIdx; j++) {
+                          sum += channelData[j];
+                          count++;
+                        }
+                      }
                     }
-                    const avgSample = count > 0 ? sum / count : (channelData[startIdx] || 0);
+                    
+                    const avgSample = count > 0 ? sum / count : 0;
                     const s = Math.max(-1, Math.min(1, avgSample));
                     this.ringBuffer[this.writeIdx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
 
@@ -110,17 +117,35 @@ export class AudioStreamer {
           }
         }
 
-        this.mediaStreamSource.connect(this.workletNode);
+        // Connect EVERY audio track via individual MediaStreamAudioSourceNode so no tracks are discarded by Web Audio API
+        audioTracks.forEach((track) => {
+          if (this.audioCtx && this.workletNode) {
+            const singleTrackStream = new MediaStream([track]);
+            const sourceNode = this.audioCtx.createMediaStreamSource(singleTrackStream);
+            sourceNode.connect(this.workletNode);
+            this.activeSources.push(sourceNode);
+          }
+        });
+
         if (this.audioCtx.state === 'suspended') {
           await this.audioCtx.resume();
         }
-        console.log(`[AudioStreamer] 🎙️ ${speaker.toUpperCase()} AudioWorklet connected (Hardware SR: ${this.audioCtx.sampleRate}Hz) → 16kHz PCM → IPC → Whisper STT`);
+        console.log(`[AudioStreamer] 🎙️ ${speaker.toUpperCase()} AudioWorklet connected (${audioTracks.length} tracks, Hardware SR: ${this.audioCtx.sampleRate}Hz) → 16kHz PCM → IPC → Whisper STT`);
         return;
       }
 
     } catch (err) {
       console.warn(`[AudioStreamer] Failed to initialize ${speaker} audio streamer:`, err);
     }
+  }
+
+  private disconnectActiveSources(): void {
+    this.activeSources.forEach((src) => {
+      try {
+        src.disconnect();
+      } catch {}
+    });
+    this.activeSources = [];
   }
 
   private static lastPartialEmitTime = 0;
@@ -149,53 +174,44 @@ export class AudioStreamer {
           timestamp,
         });
 
-        // Also populate into Chat Drawer
-        if (speaker === 'remote') {
-          eventBus.emit('cc.chat.remote', {
-            text: `🎙️ [CC - Received]: "${evt.text}"`,
-            tag: 'received',
-            timestamp,
-          });
-        } else {
-          eventBus.emit('cc.chat.local', {
-            text: `🎙️ [CC - Me]: "${evt.text}"`,
-            tag: 'me',
-            timestamp,
-          });
-        }
         console.log(`[AudioStreamer] ✅ Whisper Final (${speaker}): "${evt.text}"`);
       } else {
+        // Emit partial transcript immediately for real-time live captions UI
         const now = Date.now();
-        const payload = { text: evt.text, speaker, timestamp };
-
         if (now - AudioStreamer.lastPartialEmitTime >= 100) {
           AudioStreamer.lastPartialEmitTime = now;
           if (AudioStreamer.partialDebounceTimer) {
             clearTimeout(AudioStreamer.partialDebounceTimer);
             AudioStreamer.partialDebounceTimer = null;
           }
-          eventBus.emit('transcript.partial', payload);
+          eventBus.emit('transcript.partial', {
+            text: evt.text,
+            speaker,
+            timestamp,
+          });
         } else {
-          // Trailing-edge debounce: Guarantee the latest partial is ALWAYS delivered before a pause!
           if (AudioStreamer.partialDebounceTimer) {
             clearTimeout(AudioStreamer.partialDebounceTimer);
           }
           AudioStreamer.partialDebounceTimer = setTimeout(() => {
             AudioStreamer.lastPartialEmitTime = Date.now();
             AudioStreamer.partialDebounceTimer = null;
-            eventBus.emit('transcript.partial', payload);
+            eventBus.emit('transcript.partial', {
+              text: evt.text,
+              speaker,
+              timestamp,
+            });
           }, 100 - (now - AudioStreamer.lastPartialEmitTime));
         }
       }
     });
-
-
 
     AudioStreamer.transcriptListenerAttached = true;
     console.log('[AudioStreamer] 📡 Attached IPC transcript listener for Whisper STT results');
   }
 
   public stop(): void {
+    this.disconnectActiveSources();
     if (this.audioCtx && this.audioCtx.state === 'running') {
       this.audioCtx.suspend().catch(() => {});
     }
@@ -209,10 +225,6 @@ export class AudioStreamer {
         this.workletNode.disconnect();
       } catch {}
       this.workletNode = null;
-    }
-    if (this.mediaStreamSource) {
-      this.mediaStreamSource.disconnect();
-      this.mediaStreamSource = null;
     }
     if (this.silentGain) {
       try {

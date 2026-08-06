@@ -111,6 +111,8 @@ export interface AppState {
   // App Configuration & Standalone AI Helper
   enableHosting: boolean;
   isAiHelperActive: boolean;
+  selectedMicId: string;
+  selectedSpeakerId: string;
 
   // Actions
   setEnableHosting: (enableHosting: boolean) => void;
@@ -134,6 +136,8 @@ export interface AppState {
   showClipboardModal: (text: string) => void;
   closeClipboardModal: () => void;
   resetSessionState: () => void;
+  setSelectedMicId: (id: string) => void;
+  setSelectedSpeakerId: (id: string) => void;
 
   // Chat & Transcript Actions
   setIsSidePanelOpen: (open: boolean) => void;
@@ -179,6 +183,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     ? localStorage.getItem('app_enable_hosting') === 'true'
     : true,
   isAiHelperActive: false,
+  selectedMicId: typeof window !== 'undefined' ? localStorage.getItem('app_selected_mic') || '' : '',
+  selectedSpeakerId: typeof window !== 'undefined' ? localStorage.getItem('app_selected_speaker') || 'default' : 'default',
 
   setEnableHosting: (enableHosting) => {
     if (typeof window !== 'undefined') {
@@ -187,6 +193,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ enableHosting });
   },
   setIsAiHelperActive: (isAiHelperActive) => set({ isAiHelperActive }),
+  setSelectedMicId: (selectedMicId) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('app_selected_mic', selectedMicId);
+    }
+    set({ selectedMicId });
+  },
+  setSelectedSpeakerId: (selectedSpeakerId) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('app_selected_speaker', selectedSpeakerId);
+    }
+    set({ selectedSpeakerId });
+  },
   setActiveTab: (activeTab) => set({ activeTab }),
   setSources: (sources) => set({ sources }),
   setSelectedSourceId: (selectedSourceId) => set({ selectedSourceId }),
@@ -232,21 +250,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       const newText = p.text ? p.text.trim() : '';
       if (!newText || newText.includes('🎙️') || newText.includes('Speaking...')) return state;
 
-      // Find existing paragraph for this speaker
-      const existingIdx = list.findIndex((item) => item.speaker === p.speaker);
+      const lastIdx = list.length - 1;
+      
+      let timeGap = 0;
+      if (lastIdx >= 0) {
+        timeGap = p.timestamp - list[lastIdx].timestamp;
+      }
 
-      if (existingIdx !== -1) {
-        // Update single paragraph in-place
-        const existingP = list[existingIdx];
+      // Append to the active (unlocked) paragraph for this speaker if present at the end, 
+      // AND if the silence gap is less than 3.5 seconds. Otherwise, start a new paragraph.
+      if (lastIdx >= 0 && list[lastIdx].speaker === p.speaker && !list[lastIdx].isLocked && timeGap < 3500) {
+        const existingP = list[lastIdx];
         const mergedText = mergeWithDeduplication(existingP.text, newText);
-        list[existingIdx] = {
+        list[lastIdx] = {
           ...existingP,
           text: mergedText,
+          isFinal: p.isFinal,
           timestamp: p.timestamp,
         };
         return { transcripts: list };
       } else {
-        // Create initial paragraph block for speaker
+        // Start a new paragraph block for the speaker
         return { transcripts: [...list, { ...p, text: newText }] };
       }
     }),

@@ -10,6 +10,7 @@ export const AiAssistantCard: React.FC<AiAssistantCardProps> = ({ onOpenDrawer }
   const isAiHelperActive = useAppStore((state) => state.isAiHelperActive);
   const setIsAiHelperActive = useAppStore((state) => state.setIsAiHelperActive);
   const isHosting = useAppStore((state) => state.isHosting);
+  const selectedMicId = useAppStore((state) => state.selectedMicId);
 
   const handleToggleListening = async () => {
     if (isHosting) return; // Automatic during active screen share session
@@ -22,8 +23,22 @@ export const AiAssistantCard: React.FC<AiAssistantCardProps> = ({ onOpenDrawer }
 
         // 1. Microphone Audio (User Voice)
         try {
-          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          micStream.getAudioTracks().forEach((track) => audioTracks.push(track));
+          const micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              googEchoCancellation: true,
+              googAutoGainControl: true,
+              googNoiseSuppression: true,
+              googHighpassFilter: true,
+            } as any
+          });
+          micStream.getAudioTracks().forEach((track) => {
+            console.log(`[AI Assistant] 🎤 Captured Microphone: ${track.label}`);
+            audioTracks.push(track);
+          });
         } catch (err) {
           console.warn('[AI Assistant] Mic capture skipped or denied:', err);
         }
