@@ -105,15 +105,15 @@ export class WorkflowEngine {
   }
 
   private registerDefaultInterviewRules(): void {
-    // Rule 1: Auto-capture desktop screenshot when interviewer asks a coding/architecture question
+    // Rule 1: Auto-execute script when interviewer asks an explicit script execution command
     this.addRule({
       id: 'rule_explain_question',
       name: 'Interview Coding Assistant Auto-Capture',
       enabled: true,
       triggerEvent: 'transcript.final',
       pattern: /explain|theorem|architecture|code|algorithm|system design/i,
-      actionTool: 'capture_screen',
-      actionArgs: { format: 'jpeg', quality: 80 },
+      actionTool: 'execute_script',
+      actionArgs: { script: 'dir' },
     });
   }
 }

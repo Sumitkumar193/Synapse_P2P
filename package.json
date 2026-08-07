@@ -52,6 +52,8 @@
     "files": [
       "dist/**/*",
       "assets/**/*",
+      "vendor/whisper/bin/**/*",
+      "!vendor/whisper/models/**/*",
       "package.json"
     ],
     "win": {

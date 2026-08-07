@@ -16,6 +16,13 @@ function main() {
 
   console.log(`\n==================================================`);
   console.log(`  📦 CROSS-PLATFORM PORTABLE BUILD: ${platform} (${arch})`);
+  const includeModels = process.argv.includes('--include-models') || process.env.INCLUDE_MODELS === 'true';
+  if (includeModels) {
+    console.log(`  ⚠️ Mode: INCLUDING downloaded Whisper models in portable package`);
+  } else {
+    console.log(`  ⚡ Mode: LIGHTWEIGHT BUILD (Excluding heavy downloaded Whisper models ~500MB+)`);
+    console.log(`  💡 Tip: Use 'npm run build:portable -- --include-models' if you want to bundle all local models.`);
+  }
   console.log(`==================================================\n`);
 
   // Step 1: Run application build
@@ -24,7 +31,22 @@ function main() {
 
   // Step 2: Package Electron app
   console.log(`[Build Portable] 📦 Step 2: Packaging Electron app for platform=${platform}, arch=${arch}...`);
-  const packageCmd = `npx -y electron-packager . ${appName} --platform=${platform} --arch=${arch} --out=release --overwrite`;
+  
+  // Build ignore regex patterns for electron-packager
+  const defaultIgnorePatterns = [
+    '/(docs|Documentation|test|scratch|release|out|build|\\.git|\\.github|\\.vscode)($|/)',
+    '\\.md$',
+  ];
+
+  if (!includeModels) {
+    // Exclude heavy model downloads in vendor/whisper/models
+    defaultIgnorePatterns.push('/vendor/whisper/models($|/)');
+  }
+
+  const ignoreFlags = defaultIgnorePatterns.map((pattern) => `--ignore="${pattern}"`).join(' ');
+
+  const packageCmd = `npx -y electron-packager . ${appName} --platform=${platform} --arch=${arch} --out=release --overwrite ${ignoreFlags}`;
+  console.log(`[Build Portable] 🏃 Executing: ${packageCmd}`);
   execSync(packageCmd, { stdio: 'inherit', cwd: PROJECT_ROOT });
 
   // Step 3: Cross-platform Zip archiving using pure Node.js (adm-zip)

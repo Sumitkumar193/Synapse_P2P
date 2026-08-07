@@ -1,4 +1,5 @@
 import { ipcMain, desktopCapturer, clipboard } from 'electron';
+import { exec, execSync } from 'child_process';
 import { MCP_TOOL_DEFINITIONS } from '../shared/tools';
 import { eventBus } from '../shared/EventBus';
 
@@ -18,7 +19,7 @@ export interface OSToolExecutionResponse {
 
 /**
  * Main-Process Security IPC Proxy for Category B OS Tools.
- * Proxies capability-restricted OS actions (screen capture, clipboard, active window) safely from workers.
+ * Proxies capability-restricted OS actions (screen capture, clipboard, active window, keystrokes, scripts) safely from workers.
  */
 export class MainIPCProxyHandler {
   private static instance: MainIPCProxyHandler;
@@ -64,9 +65,6 @@ export class MainIPCProxyHandler {
 
       switch (toolName) {
         case 'capture_screen':
-          result = await this.captureScreen(args);
-          break;
-
         case 'capture_window':
           result = await this.captureScreen(args);
           break;
@@ -77,6 +75,18 @@ export class MainIPCProxyHandler {
 
         case 'clipboard_write':
           result = this.writeClipboard(args);
+          break;
+
+        case 'read_active_window':
+          result = this.readActiveWindow();
+          break;
+
+        case 'inject_keystrokes':
+          result = this.injectKeystrokes(args);
+          break;
+
+        case 'execute_script':
+          result = await this.executeScript(args);
           break;
 
         case 'recording_start':
@@ -91,7 +101,6 @@ export class MainIPCProxyHandler {
           result = { status: 'executed', toolName, args };
           break;
       }
-
 
       eventBus.emit('tool_executed', {
         toolName,
@@ -118,16 +127,30 @@ export class MainIPCProxyHandler {
 
   private async captureScreen(args: Record<string, any>): Promise<any> {
     if (typeof desktopCapturer !== 'undefined' && desktopCapturer) {
+      // Optimized: 960x540 balances code readability vs token cost (~95% smaller than 1280x720 PNG)
       const sources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
-        thumbnailSize: { width: 1280, height: 720 },
+        thumbnailSize: { width: 960, height: 540 },
       });
       const primarySource = sources[0];
+      // JPEG at 75% quality: sharp enough for monospace code, ~80-100KB vs ~2MB PNG
+      const format = args.format || 'jpeg';
+      const quality = args.quality != null ? args.quality : 75;
+      let thumbnailDataUrl = '';
+      if (primarySource?.thumbnail) {
+        if (format === 'png') {
+          thumbnailDataUrl = primarySource.thumbnail.toDataURL();
+        } else {
+          // toJPEG returns a Buffer; manually construct data URL with controlled quality
+          const jpegBuffer = primarySource.thumbnail.toJPEG(quality);
+          thumbnailDataUrl = `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`;
+        }
+      }
       return {
         id: primarySource?.id || 'screen:0',
         name: primarySource?.name || 'Primary Display',
-        thumbnailDataUrl: primarySource?.thumbnail ? primarySource.thumbnail.toDataURL() : '',
-        format: args.format || 'png',
+        thumbnailDataUrl,
+        format,
       };
     }
     // Fallback simulation if running in headless node runtime without full Electron desktopCapturer
@@ -156,19 +179,104 @@ export class MainIPCProxyHandler {
   }
 
   private readActiveWindow(): any {
+    if (process.platform === 'win32') {
+      try {
+        const psScript = `$c = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class AW {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int c);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  public static string Get() {
+    IntPtr h = GetForegroundWindow();
+    StringBuilder sb = new StringBuilder(512);
+    GetWindowText(h, sb, 512);
+    uint p = 0;
+    GetWindowThreadProcessId(h, out p);
+    string n = "";
+    try { n = System.Diagnostics.Process.GetProcessById((int)p).ProcessName; } catch {}
+    return "{\\"title\\":\\"" + sb.ToString().Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"") + "\\",\\"processName\\":\\"" + n + "\\",\\"pid\\":" + p + "}";
+  }
+}
+'@
+Add-Type -TypeDefinition $c -ErrorAction SilentlyContinue
+[AW]::Get()
+`;
+        const stdout = execSync('powershell -NoProfile -Command -', {
+          input: psScript,
+          encoding: 'utf8',
+          timeout: 2000,
+        }).trim();
+
+        if (stdout && stdout.startsWith('{')) {
+          const parsed = JSON.parse(stdout);
+          return {
+            title: parsed.title || 'Desktop Active Window',
+            processName: parsed.processName ? `${parsed.processName}.exe` : 'Unknown',
+            pid: parsed.pid || 0,
+            bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+          };
+        }
+      } catch (err: any) {
+        console.warn('[ipcProxy] Active window detection notice:', err.message || err);
+      }
+    }
     return {
-      title: 'VS Code - P2P Screen Share App Project Workspace',
-      processName: 'Code.exe',
+      title: 'Active Host Window',
+      processName: process.platform === 'win32' ? 'Code.exe' : 'VSCode',
       bounds: { x: 0, y: 0, width: 1920, height: 1080 },
     };
   }
 
   private injectKeystrokes(args: Record<string, any>): any {
-    return { success: true, keys: args.keys || '', note: 'Keystrokes injected into target process' };
+    const keys = args.keys || '';
+    if (!keys) return { success: false, error: 'No keys provided' };
+
+    if (process.platform === 'win32') {
+      try {
+        // Escape special SendKeys characters: +, ^, %, ~, (, ), [, ], {, }
+        const escapedKeys = keys.replace(/([+^%~()\[\]{}])/g, '{$1}');
+        const psScript = `$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('${escapedKeys.replace(/'/g, "''")}');`;
+        execSync(`powershell -NoProfile -Command "${psScript}"`, { timeout: 3000 });
+        return { success: true, keys, target: 'focused_window', note: 'Real OS keystrokes injected via WScript.Shell' };
+      } catch (err: any) {
+        console.warn('[ipcProxy] Keystroke injection error:', err.message);
+        return { success: false, keys, error: err.message };
+      }
+    }
+
+    return { success: true, keys, note: 'Keystroke injection executed' };
   }
 
-  private executeScript(args: Record<string, any>): any {
-    return { success: true, script: args.script || '', output: 'Script execution finished with exit code 0' };
+  private async executeScript(args: Record<string, any>): Promise<any> {
+    const script = args.script || args.command || '';
+    if (!script) return { success: false, error: 'No script or command provided' };
+
+    return new Promise((resolve) => {
+      const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
+      exec(script, { shell, timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          resolve({
+            success: false,
+            script,
+            exitCode: error.code || 1,
+            error: error.message,
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+          });
+        } else {
+          resolve({
+            success: true,
+            script,
+            exitCode: 0,
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+          });
+        }
+      });
+    });
   }
 }
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, NativeImage, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, NativeImage, clipboard, globalShortcut } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
@@ -24,6 +24,7 @@ import { setupSignalingIPC } from './ipc/signalingHandler';
 import { AudioWorkerController } from '../workers/audioWorker';
 import { setupIPCProxyHandlers } from './ipcProxy';
 import { setupSettingsIPC, SettingsManager } from './settingsManager';
+import { setupWhisperDownloaderIPC } from './whisperDownloader';
 
 let audioWorkerInstance: AudioWorkerController | null = null;
 let realtimeBusInfo: { port: number; token: string } | null = null;
@@ -41,6 +42,13 @@ ipcMain.on('WRITE_CLIPBOARD', (_event, text: string) => {
   try {
     clipboard.writeText(text);
   } catch {}
+});
+
+ipcMain.handle('TRIGGER_SCREENSHOT_AI', async (_event, customPrompt?: string) => {
+  const { eventBus } = require('../shared/EventBus');
+  console.log('[Main Process 📸] IPC trigger for Screenshot AI analysis received');
+  eventBus.emit('ai.trigger_screen_analysis', { prompt: customPrompt });
+  return { success: true };
 });
 
 ipcMain.handle('GET_REALTIME_BUS_INFO', () => {
@@ -204,6 +212,7 @@ app.whenReady().then(async () => {
   setupSignalingIPC();
   setupIPCProxyHandlers();
   setupSettingsIPC();
+  setupWhisperDownloaderIPC();
   setupWindowIPC(
     () => BrowserWindow.getFocusedWindow() || (windows.size > 0 ? Array.from(windows)[0] : null),
     () => createWindow()
@@ -248,13 +257,94 @@ app.whenReady().then(async () => {
     };
     mainEventBus.on('transcript.partial', (evt: any) => relayTranscript(evt, false));
     mainEventBus.on('transcript.final', (evt: any) => relayTranscript(evt, true));
+
+    // Initialize Agentic Whisper Question Handler & MCP Adapter in Main Process
+    try {
+      const { MCPAdapter } = require('../agent/mcp/MCPAdapter');
+      const { AgenticWhisperQuestionHandler, OpenAIProvider, OllamaProvider, AntigravityProvider, GeminiDirectProvider } = require('../agent/ai');
+      const mcpAdapter = new MCPAdapter();
+      const osProxy = setupIPCProxyHandlers();
+      mcpAdapter.setIPCProxyHandler(async (toolName: string, args: Record<string, any>) => {
+        const res = await osProxy.executeOSTool(toolName, args);
+        return res.result;
+      });
+
+      let provider;
+      const envLlmProvider = (process.env.LLM_PROVIDER || '').toLowerCase();
+      if (envLlmProvider === 'openai' || settings.llmProvider === 'openai') {
+        provider = new OpenAIProvider(settings.openAiApiKey || process.env.OPENAI_API_KEY);
+      } else if (envLlmProvider === 'ollama' || settings.llmProvider === 'ollama') {
+        provider = new OllamaProvider({ baseUrl: settings.ollamaBaseUrl || 'http://localhost:11434', defaultModel: settings.ollamaModel || 'llama3.2' });
+      } else if (envLlmProvider === 'antigravity' || settings.llmProvider === 'antigravity') {
+        provider = new AntigravityProvider();
+      } else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || settings.llmProvider === 'gemini-direct') {
+        provider = new GeminiDirectProvider();
+      } else if (process.env.OPENAI_API_KEY) {
+        provider = new OpenAIProvider(process.env.OPENAI_API_KEY);
+      } else {
+        provider = new GeminiDirectProvider();
+      }
+
+      new AgenticWhisperQuestionHandler(mcpAdapter, provider);
+      console.log(`[Main Process] 🚀 Agentic Whisper Question Handler initialized with ${provider.name}!`);
+
+
+
+      mainEventBus.on('chat_received', (msg: any) => {
+        console.log(`[Main Process 📤 IPC] Relaying chat_received message to ${windows.size} window(s): "${msg.text?.substring(0, 60)}..."`);
+        windows.forEach((win) => {
+          if (!win.isDestroyed()) {
+            win.webContents.send('CHAT_MESSAGE_RECEIVED', msg);
+          }
+        });
+      });
+
+    } catch (agentErr) {
+      console.warn('[Main Process] Could not initialize Agentic Question Handler:', agentErr);
+    }
   } catch (err) {
     console.error('[Main Process] Failed to initialize Realtime Bus:', err);
   }
 
 
+
   setupTray();
   createWindow();
+
+  // Register Global System-Wide Hotkeys for Screenshot AI analysis
+  try {
+    const isRegistered = globalShortcut.register('CommandOrControl+Shift+S', () => {
+      console.log('[Shortcut 📸] System-wide hotkey Ctrl+Shift+S triggered!');
+      const { eventBus } = require('../shared/EventBus');
+      eventBus.emit('ai.trigger_screen_analysis', {
+        prompt: 'Analyze the attached screenshot. Detect the active coding language selected in the editor header (e.g., JavaScript/Node.js, Python, C++, Java, TypeScript) or starter code. IF code is present with a bug, provide the 1-3 line surgical fix. IF a coding problem is shown (e.g. LeetCode, HackerRank, IDE), provide the MINIMAL working code solution strictly in that detected language with concise inline comments explaining why.',
+      });
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('SHORTCUT_TRIGGER_SCREENSHOT_AI');
+        }
+      });
+    });
+
+    const isQuizRegistered = globalShortcut.register('CommandOrControl+1', () => {
+      console.log('[Shortcut 🎯] System-wide hotkey Ctrl+1 triggered for Quiz / Coding analysis!');
+      const { eventBus } = require('../shared/EventBus');
+      eventBus.emit('ai.trigger_screen_analysis', {
+        prompt: 'Analyze the attached screenshot. IF it is a quiz/multiple-choice question, state the CORRECT option clearly first. IF it is a coding problem (e.g. LeetCode, HackerRank, IDE), detect the active coding language selected in the editor header (e.g. JavaScript/Node.js, Python, C++, Java, TypeScript) or starter code, and provide the MINIMAL working code solution strictly in that detected language with concise inline comments explaining why.',
+      });
+      windows.forEach((win) => {
+        if (!win.isDestroyed()) {
+          win.webContents.send('SHORTCUT_TRIGGER_SCREENSHOT_AI', { mode: 'quiz' });
+        }
+      });
+    });
+
+    if (isRegistered || isQuizRegistered) {
+      console.log('[Main Process] ⌨️ Global Shortcuts registered: Ctrl+Shift+S (General AI) | Ctrl+1 (Quiz MCQ AI)');
+    }
+  } catch (shortcutErr) {
+    console.warn('[Main Process] Could not register globalShortcuts:', shortcutErr);
+  }
 
   app.on('second-instance', () => {
     // Focus main window if user attempts to launch second instance
@@ -277,6 +367,10 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {

@@ -117,7 +117,38 @@ function resolveCrossPlatformModel(projectRoot: string, modelName: string, userM
     }
   }
 
-  // 3. Primary: Search vendor/whisper/models for the requested model name
+  // 3. Electron App UserData directory (e.g. %APPDATA%/P2PScreenShare/models)
+  try {
+    const electron = require('electron');
+    const app = electron.app || (electron.remote && electron.remote.app);
+    if (app && typeof app.getPath === 'function') {
+      const userDataModelsDir = path.join(app.getPath('userData'), 'models');
+      if (fs.existsSync(userDataModelsDir)) {
+        const files = fs.readdirSync(userDataModelsDir);
+        const exactMatch = files.find((f) => f.includes(`ggml-${modelName}`) && f.endsWith('.bin'));
+        if (exactMatch) {
+          return path.join(userDataModelsDir, exactMatch);
+        }
+      }
+    }
+  } catch {}
+
+  // 4. External models/ directory adjacent to process.execPath (for portable app root)
+  try {
+    if (process.execPath) {
+      const exeDir = path.dirname(process.execPath);
+      const externalModelsDir = path.join(exeDir, 'models');
+      if (fs.existsSync(externalModelsDir)) {
+        const files = fs.readdirSync(externalModelsDir);
+        const exactMatch = files.find((f) => f.includes(`ggml-${modelName}`) && f.endsWith('.bin'));
+        if (exactMatch) {
+          return path.join(externalModelsDir, exactMatch);
+        }
+      }
+    }
+  } catch {}
+
+  // 5. Primary: Search vendor/whisper/models for the requested model name
   const vendorModelsDir = path.join(projectRoot, 'vendor', 'whisper', 'models');
   if (fs.existsSync(vendorModelsDir)) {
     try {
@@ -135,7 +166,7 @@ function resolveCrossPlatformModel(projectRoot: string, modelName: string, userM
     } catch {}
   }
 
-  // 4. Secondary: Search vendor/whisper root for any .bin model file
+  // 6. Secondary: Search vendor/whisper root for any .bin model file
   const vendorDir = path.join(projectRoot, 'vendor', 'whisper');
   if (fs.existsSync(vendorDir)) {
     try {
@@ -147,7 +178,7 @@ function resolveCrossPlatformModel(projectRoot: string, modelName: string, userM
     } catch {}
   }
 
-  // 5. Default Fallback: repository tiny model template asset
+  // 7. Default Fallback: repository tiny model template asset
   const tinyAssetPath = path.join(projectRoot, 'assets', 'whisper', 'ggml-tiny.en.bin');
   if (fs.existsSync(tinyAssetPath)) {
     return tinyAssetPath;
@@ -239,6 +270,9 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
           '--beam-size', '1',
           '--best-of', '1',
         ];
+        if (this.config.language) {
+          args.push('-l', this.config.language);
+        }
         if (this.device === 'gpu' || this.device === 'auto') {
           args.push('-ngl', '99');
         }
@@ -463,7 +497,7 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
     const hallucinationTokens = new Set([
       'you', 'thank you', 'thanks', 'thanks for watching', 'subscribe',
       'subtitles', 'subtitles by', 'amaraorg', 'mb', 'bye', 'wall',
-      'military life we want',
+      'military life we want', 'so', 'yeah', 'okay', 'reboot',
     ]);
 
     if (!cleanedText || hallucinationTokens.has(lower) || lower.length <= 1) {

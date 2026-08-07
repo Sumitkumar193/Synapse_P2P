@@ -59,6 +59,21 @@ export class AudioStreamer {
                   const frameCount = input[0].length;
                   const step = Math.max(1, sampleRate / 16000);
                   
+                  // Measure frame RMS energy for real-time WebAudio noise gate (-48dB)
+                  let frameSumSquare = 0;
+                  let totalSamples = 0;
+                  for (let ch = 0; ch < numChannels; ch++) {
+                    const chData = input[ch];
+                    if (chData) {
+                      for (let i = 0; i < frameCount; i++) {
+                        frameSumSquare += chData[i] * chData[i];
+                        totalSamples++;
+                      }
+                    }
+                  }
+                  const frameRms = totalSamples > 0 ? Math.sqrt(frameSumSquare / totalSamples) : 0;
+                  const isNoiseOrSilence = frameRms < 0.004;
+
                   for (let i = 0; i < frameCount; i += step) {
                     let sum = 0;
                     let count = 0;
@@ -75,7 +90,7 @@ export class AudioStreamer {
                       }
                     }
                     
-                    const avgSample = count > 0 ? sum / count : 0;
+                    const avgSample = (count > 0 && !isNoiseOrSilence) ? sum / count : 0;
                     const s = Math.max(-1, Math.min(1, avgSample));
                     this.ringBuffer[this.writeIdx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
 
@@ -117,12 +132,24 @@ export class AudioStreamer {
           }
         }
 
-        // Connect EVERY audio track via individual MediaStreamAudioSourceNode so no tracks are discarded by Web Audio API
+        // Connect EVERY audio track via individual MediaStreamAudioSourceNode & Highpass Filter Node
         audioTracks.forEach((track) => {
           if (this.audioCtx && this.workletNode) {
             const singleTrackStream = new MediaStream([track]);
             const sourceNode = this.audioCtx.createMediaStreamSource(singleTrackStream);
-            sourceNode.connect(this.workletNode);
+
+            if (speaker === 'local') {
+              // High-pass BiquadFilter at 85Hz to strip electrical power hum (50Hz/60Hz) & AC/rumble noise
+              const highpass = this.audioCtx.createBiquadFilter();
+              highpass.type = 'highpass';
+              highpass.frequency.value = 85;
+
+              sourceNode.connect(highpass);
+              highpass.connect(this.workletNode);
+            } else {
+              sourceNode.connect(this.workletNode);
+            }
+
             this.activeSources.push(sourceNode);
           }
         });
@@ -157,7 +184,16 @@ export class AudioStreamer {
   private static attachTranscriptListener(): void {
     if (typeof window === 'undefined' || !(window as any).electronAPI?.onTranscript) return;
 
+    if ((window as any).electronAPI?.onChatMessage) {
+      (window as any).electronAPI.onChatMessage((msg: any) => {
+        console.log('[Renderer IPC 📥] Received CHAT_MESSAGE_RECEIVED over IPC:', msg.text?.substring(0, 60));
+        eventBus.emit('chat_received', msg);
+      });
+    }
+
+
     (window as any).electronAPI.onTranscript((evt: any) => {
+
       const timestamp = evt.timestamp || Date.now();
       const speaker = evt.speaker || 'local';
 

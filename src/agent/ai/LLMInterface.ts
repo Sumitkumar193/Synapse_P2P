@@ -2,6 +2,10 @@ export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string;
+  images?: Array<{
+    mimeType: string;
+    data: string; // Base64 image data string
+  }>;
   toolCallId?: string;
   toolCalls?: Array<{
     id: string;

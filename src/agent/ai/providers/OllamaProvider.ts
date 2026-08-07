@@ -58,12 +58,8 @@ export class OllamaProvider implements ILLMProvider {
         },
       };
     } catch (err: any) {
-      // Fallback mock if Ollama service is offline on test machine
-      const lastUserMsg = messages.filter((m) => m.role === 'user').pop()?.content || '';
-      return {
-        content: `[Ollama Local Fallback (${model})] Analyzed query: "${lastUserMsg}". Answer: CAP theorem states Consistency, Availability, and Partition tolerance trade-offs.`,
-        usage: { promptTokens: 10, completionTokens: 25, totalTokens: 35 },
-      };
+      throw new Error(`[Ollama Error] Could not connect to local Ollama server at '${this.baseUrl}': ${err.message || 'Server offline'}`);
     }
+
   }
 }

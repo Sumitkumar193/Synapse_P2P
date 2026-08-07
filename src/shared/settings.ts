@@ -22,11 +22,15 @@ export interface AppSettings {
   // STT Settings
   whisperProvider: 'local' | 'openai';
   localWhisperModel: 'tiny' | 'base' | 'small' | 'medium' | 'large';
+  whisperMultilingual: boolean;
+  whisperLanguage: string;
   whisperThreads: number;
   openAiApiKey: string;
 
   // AI LLM Engine Settings
-  llmProvider: 'openai' | 'claude-cli' | 'ollama';
+  llmProvider: 'openai' | 'claude-cli' | 'ollama' | 'antigravity' | 'gemini-direct';
+
+
   openAiModel: string;
   ollamaBaseUrl: string;
   ollamaModel: string;
@@ -40,6 +44,10 @@ export interface AppSettings {
   requireApprovalForOsTools: boolean;
   autoOpenChatPanel: boolean;
   enableDualSharingJoinPanels: boolean;
+  // Telegram Channel AI Broadcast Relay
+  enableTelegramRelay: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
 
   // MCP Servers Configuration
   mcpServers: MCPServerConfig[];
@@ -52,17 +60,21 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
   signalingMethod: 'auto',
 
-  whisperProvider: 'local',
+  whisperProvider: 'openai',
+
   localWhisperModel: 'tiny',
+  whisperMultilingual: true,
+  whisperLanguage: 'auto',
   whisperThreads: 4,
   openAiApiKey: '',
 
-  llmProvider: 'openai',
-  openAiModel: 'gpt-4o-mini',
+  llmProvider: 'antigravity',
+  openAiModel: 'gemini-3.6-flash',
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: 'llama3.2',
   claudeCommand: 'claude',
-  systemPromptInstructions: 'Always analyze technical interview questions systematically.',
+  systemPromptInstructions: 'Always analyze technical questions systematically with high accuracy.',
+
 
   enableHosting: true,
   autoCaptureOnQuestion: true,
@@ -70,6 +82,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   requireApprovalForOsTools: true,
   autoOpenChatPanel: true,
   enableDualSharingJoinPanels: true,
+
+  enableTelegramRelay: false,
+  telegramBotToken: '',
+  telegramChatId: '',
 
   mcpServers: [
     {

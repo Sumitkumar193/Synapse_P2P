@@ -1,6 +1,8 @@
 import { AppSettings, DEFAULT_APP_SETTINGS, AppThemeMode } from '../../shared/settings';
 import { themeManager } from '../utils/themeManager';
 import { useAppStore } from '../store/useAppStore';
+import { WHISPER_MODELS, SUPPORTED_LANGUAGES } from '../../shared/whisperModels';
+import { telegramRelayService } from '../../agent/telegram/TelegramRelayService';
 
 export type SettingsTabId =
   | 'general'
@@ -87,6 +89,7 @@ export class SettingsPanelComponent {
         const res = await (window as any).electronAPI.getSettings();
         if (res) {
           this.settings = res;
+          telegramRelayService.updateFromSettings(res);
           if (res.enableHosting !== undefined) {
             useAppStore.getState().setEnableHosting(res.enableHosting);
           }
@@ -107,6 +110,9 @@ export class SettingsPanelComponent {
 
     const whisperProvider = (this.containerEl.querySelector('#settingWhisperProvider') as HTMLSelectElement)?.value as any || this.settings.whisperProvider;
     const localWhisperModel = (this.containerEl.querySelector('#settingWhisperModel') as HTMLSelectElement)?.value as any || this.settings.localWhisperModel;
+    const whisperMultilingualEl = this.containerEl.querySelector('#settingWhisperMultilingual') as HTMLInputElement | null;
+    const whisperMultilingual = whisperMultilingualEl ? whisperMultilingualEl.checked : (this.settings.whisperMultilingual ?? true);
+    const whisperLanguage = (this.containerEl.querySelector('#settingWhisperLanguage') as HTMLSelectElement)?.value || this.settings.whisperLanguage || 'auto';
     const whisperThreadsEl = this.containerEl.querySelector('#settingWhisperThreads') as HTMLInputElement | null;
     const whisperThreads = whisperThreadsEl ? parseInt(whisperThreadsEl.value || '4', 10) : this.settings.whisperThreads;
     const openAiApiKeyEl = this.containerEl.querySelector('#settingOpenAiKey') as HTMLInputElement | null;
@@ -133,6 +139,11 @@ export class SettingsPanelComponent {
     const enableDualPanelsEl = this.containerEl.querySelector('#settingDualPanels') as HTMLInputElement | null;
     const enableDualSharingJoinPanels = enableDualPanelsEl ? enableDualPanelsEl.checked : (this.settings.enableDualSharingJoinPanels ?? true);
 
+    const enableTelegramRelayEl = this.containerEl.querySelector('#settingEnableTelegramRelay') as HTMLInputElement | null;
+    const enableTelegramRelay = enableTelegramRelayEl ? enableTelegramRelayEl.checked : (this.settings.enableTelegramRelay ?? false);
+    const telegramBotToken = (this.containerEl.querySelector('#settingTelegramBotToken') as HTMLInputElement)?.value ?? this.settings.telegramBotToken;
+    const telegramChatId = (this.containerEl.querySelector('#settingTelegramChatId') as HTMLInputElement)?.value ?? this.settings.telegramChatId;
+
     this.settings = {
       ...this.settings,
       userName,
@@ -141,6 +152,8 @@ export class SettingsPanelComponent {
       signalingMethod,
       whisperProvider,
       localWhisperModel,
+      whisperMultilingual,
+      whisperLanguage,
       whisperThreads,
       openAiApiKey,
       llmProvider,
@@ -153,12 +166,30 @@ export class SettingsPanelComponent {
       requireApprovalForOsTools,
       autoOpenChatPanel,
       enableDualSharingJoinPanels,
+      enableTelegramRelay,
+      telegramBotToken,
+      telegramChatId,
     };
 
+    telegramRelayService.updateFromSettings(this.settings);
     useAppStore.getState().setEnableHosting(enableHosting);
-
-
     themeManager.applyTheme(appTheme);
+
+    // If local Whisper is active, check if model exists or trigger download
+    if (whisperProvider === 'local' && typeof window !== 'undefined' && (window as any).electronAPI?.checkModelExists) {
+      try {
+        const check = await (window as any).electronAPI.checkModelExists(localWhisperModel, whisperMultilingual);
+        if (!check.exists) {
+          console.log(`[Settings] Model ${localWhisperModel} not found locally. Launching downloader popup...`);
+          if ((window as any).whisperDownloadModalInstance) {
+            (window as any).whisperDownloadModalInstance.show(localWhisperModel, check.fileName);
+          }
+          await (window as any).electronAPI.downloadWhisperModel(localWhisperModel, whisperMultilingual);
+        }
+      } catch (err) {
+        console.warn('[Settings] Error checking/downloading model:', err);
+      }
+    }
 
     if (typeof window !== 'undefined' && (window as any).electronAPI?.saveSettings) {
       try {
@@ -319,20 +350,43 @@ export class SettingsPanelComponent {
           
           <div class="form-group-card-dark">
             <div class="form-field-dark">
-              <label>Speech-to-Text Provider</label>
+              <label>Speech-to-Text Engine Provider</label>
               <select id="settingWhisperProvider">
-                <option value="local" ${this.settings.whisperProvider === 'local' ? 'selected' : ''}>Native whisper.cpp C++ Binary (Offline Local Model)</option>
+                <option value="local" ${this.settings.whisperProvider === 'local' ? 'selected' : ''}>Native whisper.cpp C++ Binary (Offline Local GGML Model)</option>
                 <option value="openai" ${this.settings.whisperProvider === 'openai' ? 'selected' : ''}>Cloud OpenAI Audio Whisper REST API</option>
               </select>
             </div>
 
             <div class="form-field-dark">
-              <label>Local Model Architecture</label>
+              <label>Local Whisper Model Architecture</label>
               <select id="settingWhisperModel">
-                <option value="tiny" ${this.settings.localWhisperModel === 'tiny' ? 'selected' : ''}>ggml-tiny.en.bin (39 MB — ~2ms latency)</option>
-                <option value="base" ${this.settings.localWhisperModel === 'base' ? 'selected' : ''}>ggml-base.en.bin (74 MB — Balanced)</option>
-                <option value="small" ${this.settings.localWhisperModel === 'small' ? 'selected' : ''}>ggml-small.en.bin (244 MB — High Accuracy)</option>
+                <option value="tiny" ${this.settings.localWhisperModel === 'tiny' ? 'selected' : ''}>Tiny (${WHISPER_MODELS.tiny.sizeLabel} — Fast ~2ms, Minimal RAM)</option>
+                <option value="base" ${this.settings.localWhisperModel === 'base' ? 'selected' : ''}>Base (${WHISPER_MODELS.base.sizeLabel} — Balanced Speed & Accuracy)</option>
+                <option value="small" ${this.settings.localWhisperModel === 'small' ? 'selected' : ''}>Small (${WHISPER_MODELS.small.sizeLabel} — High Accuracy STT)</option>
+                <option value="medium" ${this.settings.localWhisperModel === 'medium' ? 'selected' : ''}>Medium (${WHISPER_MODELS.medium.sizeLabel} — Production Grade Accuracy)</option>
+                <option value="large" ${this.settings.localWhisperModel === 'large' ? 'selected' : ''}>Large v3 (${WHISPER_MODELS.large.sizeLabel} — Maximum Accuracy & Multilingual)</option>
               </select>
+              <p class="field-hint-dark">If the selected model is not present locally, it will automatically download with a live progress bar.</p>
+            </div>
+
+            <div class="checkbox-row-dark" style="margin-top: 12px; margin-bottom: 16px;">
+              <input type="checkbox" id="settingWhisperMultilingual" ${this.settings.whisperMultilingual !== false ? 'checked' : ''} />
+              <div>
+                <strong>Enable Multilingual Support (99+ Languages)</strong>
+                <p class="field-hint-dark">Uses multilingual model files (.bin) to transcribe non-English or mixed languages.</p>
+              </div>
+            </div>
+
+            <div class="form-field-dark">
+              <label>Target Spoken Language</label>
+              <select id="settingWhisperLanguage">
+                ${SUPPORTED_LANGUAGES.map((lang) => `
+                  <option value="${lang.code}" ${this.settings.whisperLanguage === lang.code ? 'selected' : ''}>
+                    ${lang.name}
+                  </option>
+                `).join('')}
+              </select>
+              <p class="field-hint-dark">Language passed to Whisper engine (Auto-detect automatically identifies spoken language).</p>
             </div>
 
             <div class="form-field-dark">
@@ -341,7 +395,7 @@ export class SettingsPanelComponent {
             </div>
 
             <div class="form-field-dark">
-              <label>OpenAI API Key (for Cloud Whisper & OpenAI LLM)</label>
+              <label>OpenAI API Key (for Cloud Whisper API fallback)</label>
               <input type="password" id="settingOpenAiKey" value="${this.settings.openAiApiKey}" placeholder="sk-..." />
             </div>
           </div>
@@ -450,13 +504,51 @@ export class SettingsPanelComponent {
       case 'connectors':
         return `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h2 class="tab-title-dark" style="margin: 0;">🔌 Connectors & MCP Servers</h2>
+            <h2 class="tab-title-dark" style="margin: 0;">🔌 Connectors & Integrations</h2>
             <button 
               onclick="window.settingsComponentInstance?.toggleAddMcpServerForm(true)"
               style="background: #6366f1; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 4px;"
             >
               ➕ Add MCP Server
             </button>
+          </div>
+
+          <!-- Telegram Channel AI Broadcast Relay Card -->
+          <div class="form-group-card-dark" style="margin-bottom: 16px; border: 1px solid rgba(59, 130, 246, 0.3); background: rgba(15, 23, 42, 0.75);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h3 style="margin: 0; font-size: 0.95rem; color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+                ✈️ Telegram Channel AI Broadcast Relay
+              </h3>
+              <label class="switch">
+                <input type="checkbox" id="settingEnableTelegramRelay" ${this.settings.enableTelegramRelay ? 'checked' : ''} />
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <p style="color: #94a3b8; font-size: 0.8rem; margin-top: 0; margin-bottom: 14px;">
+              Automatically broadcast live AI Copilot answers directly to your Telegram channel or chat via Official Telegram Bot API.
+            </p>
+
+            <div class="form-field-dark">
+              <label>Telegram Bot Token</label>
+              <input type="password" id="settingTelegramBotToken" value="${this.settings.telegramBotToken || ''}" placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" />
+              <small style="color: #64748b; font-size: 0.73rem;">Obtain from @BotFather on Telegram</small>
+            </div>
+
+            <div class="form-field-dark">
+              <label>Target Channel or Chat ID</label>
+              <input type="text" id="settingTelegramChatId" value="${this.settings.telegramChatId || ''}" placeholder="e.g. @my_channel_name or -100123456789" />
+              <small style="color: #64748b; font-size: 0.73rem;">e.g. @your_channel or numeric Chat ID</small>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+              <button 
+                onclick="window.settingsComponentInstance?.testTelegramRelay()"
+                style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 6px 14px; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 6px;"
+              >
+                🧪 Send Test Message to Telegram
+              </button>
+            </div>
           </div>
           
           ${this.isAddingMcpServer ? `
@@ -605,6 +697,31 @@ export class SettingsPanelComponent {
     const srv = (this.settings.mcpServers || []).find((s) => s.id === serverId);
     if (srv) {
       srv.enabled = !srv.enabled;
+    }
+  }
+
+  public async testTelegramRelay(): Promise<void> {
+    const tokenEl = document.getElementById('settingTelegramBotToken') as HTMLInputElement | null;
+    const chatIdEl = document.getElementById('settingTelegramChatId') as HTMLInputElement | null;
+
+    const token = tokenEl ? tokenEl.value.trim() : this.settings.telegramBotToken;
+    const chatId = chatIdEl ? chatIdEl.value.trim() : this.settings.telegramChatId;
+
+    if (!token || !chatId) {
+      alert('⚠️ Please enter both Telegram Bot Token and Chat ID before testing.');
+      return;
+    }
+
+    telegramRelayService.updateConfig({ enabled: true, botToken: token, chatId });
+    const res = await telegramRelayService.sendTelegramMessage(
+      '🚀 **P2P Live AI Copilot Test Connection**: Telegram AI Broadcast Relay is active and connected successfully!',
+      'P2P Live AI Copilot'
+    );
+
+    if (res.success) {
+      alert('✅ Test message sent successfully! Check your Telegram channel/chat.');
+    } else {
+      alert(`❌ Telegram Test Failed: ${res.error}`);
     }
   }
 }

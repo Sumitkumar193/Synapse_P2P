@@ -10,6 +10,121 @@ interface SideDrawerProps {
   onClose: () => void;
 }
 
+function parseInlineMarkdown(text: string): React.ReactNode[] {
+  const regex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+  const tokens = text.split(regex);
+
+  return tokens.map((token, idx) => {
+    if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
+      return <strong key={idx} style={{ color: '#f8fafc', fontWeight: 700 }}>{token.slice(2, -2)}</strong>;
+    }
+    if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
+      return <em key={idx} style={{ color: '#cbd5e1' }}>{token.slice(1, -1)}</em>;
+    }
+    if (token.startsWith('`') && token.endsWith('`') && token.length > 2) {
+      return (
+        <code key={idx} style={{
+          background: 'rgba(99, 102, 241, 0.18)',
+          border: '1px solid rgba(129, 140, 248, 0.3)',
+          color: '#a5b4fc',
+          padding: '1px 6px',
+          borderRadius: '4px',
+          fontFamily: 'Consolas, Monaco, monospace',
+          fontSize: '0.85em',
+        }}>
+          {token.slice(1, -1)}
+        </code>
+      );
+    }
+    return token;
+  });
+}
+
+function renderMarkdown(text: string): React.ReactNode {
+  if (!text) return null;
+
+  const parts = text.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('```') && part.endsWith('```')) {
+          const content = part.slice(3, -3).trim();
+          const lines = content.split('\n');
+          const firstLine = lines[0].trim();
+          const hasLang = /^[a-zA-Z0-9_-]+$/.test(firstLine);
+          const language = hasLang ? firstLine : '';
+          const codeText = hasLang ? lines.slice(1).join('\n') : lines.join('\n');
+
+          return (
+            <div key={i} style={{
+              margin: '8px 0',
+              background: '#090d16',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: '6px',
+              overflow: 'hidden',
+              fontFamily: 'Consolas, Monaco, monospace',
+              fontSize: '0.82rem',
+            }}>
+              {language && (
+                <div style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                  fontSize: '0.7rem',
+                  color: '#818cf8',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                }}>
+                  {language}
+                </div>
+              )}
+              <pre style={{ margin: 0, padding: '10px 12px', overflowX: 'auto', color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+                <code>{codeText}</code>
+              </pre>
+            </div>
+          );
+        }
+
+        const lines = part.split('\n');
+        return (
+          <span key={i}>
+            {lines.map((line, lineIdx) => {
+              if (/^#{1,3}\s/.test(line)) {
+                const level = line.match(/^#{1,3}/)![0].length;
+                const title = line.replace(/^#{1,3}\s/, '');
+                const fontSize = level === 1 ? '1.05rem' : level === 2 ? '0.98rem' : '0.92rem';
+                return (
+                  <div key={lineIdx} style={{ fontSize, fontWeight: 700, color: '#f8fafc', margin: '8px 0 4px 0' }}>
+                    {parseInlineMarkdown(title)}
+                  </div>
+                );
+              }
+
+              if (/^\s*[-*]\s/.test(line)) {
+                const bulletText = line.replace(/^\s*[-*]\s/, '');
+                return (
+                  <div key={lineIdx} style={{ display: 'flex', gap: '6px', margin: '3px 0 3px 6px' }}>
+                    <span style={{ color: '#818cf8', fontWeight: 700 }}>•</span>
+                    <span>{parseInlineMarkdown(bulletText)}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <React.Fragment key={lineIdx}>
+                  {parseInlineMarkdown(line)}
+                  {lineIdx < lines.length - 1 && <br />}
+                </React.Fragment>
+              );
+            })}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 export const SideDrawer: React.FC<SideDrawerProps> = ({
   onSendMessage,
   onSendFile,
@@ -17,8 +132,10 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   onClose,
 }) => {
   const chatMessages = useAppStore((state) => state.chatMessages);
+  const addChatMessage = useAppStore((state) => state.addChatMessage);
   const transcripts = useAppStore((state) => state.transcripts);
   const addTranscriptParagraph = useAppStore((state) => state.addTranscriptParagraph);
+
   const lockCurrentParagraph = useAppStore((state) => state.lockCurrentParagraph);
   const clearTranscripts = useAppStore((state) => state.clearTranscripts);
   const selectedMicId = useAppStore((state) => state.selectedMicId);
@@ -95,6 +212,17 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
       lockCurrentParagraph();
     });
 
+    const unsubChat = eventBus.on('chat_received', (evt) => {
+      console.log('[React Chat UI ⚛️] Rendering chat message in Zustand Store / SideDrawer:', evt.text?.substring(0, 60));
+      addChatMessage({
+        id: evt.id,
+        sender: evt.isAi ? 'remote' : 'local',
+        kind: 'text',
+        text: `[${evt.sender}]: ${evt.text}`,
+        timestamp: evt.timestamp,
+      });
+    });
+
 
 
     return () => {
@@ -102,8 +230,9 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
       unsubFinal();
       unsubCc();
       unsubPause();
+      unsubChat();
     };
-  }, [addTranscriptParagraph]);
+  }, [addTranscriptParagraph, addChatMessage]);
 
 
   const handleSendChat = (e: React.FormEvent) => {
@@ -418,7 +547,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                       </span>
                     </div>
 
-                    {msg.kind === 'text' && <div className="message-text">{msg.text}</div>}
+                    {msg.kind === 'text' && <div className="message-text">{renderMarkdown(msg.text || '')}</div>}
 
                     {msg.kind === 'file' && msg.fileData && (
                       <div className="inline-file-card">

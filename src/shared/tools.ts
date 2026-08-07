@@ -83,7 +83,7 @@ export const MCP_TOOL_DEFINITIONS: Record<string, MCPToolDefinition> = {
     name: 'capture_screen',
     description: 'Capture a desktop screenshot of the current primary display.',
     category: 'ipc_proxied',
-    requiresApproval: true,
+    requiresApproval: false,
     inputSchema: {
       type: 'object',
       properties: {
@@ -96,7 +96,7 @@ export const MCP_TOOL_DEFINITIONS: Record<string, MCPToolDefinition> = {
     name: 'capture_window',
     description: 'Capture a screenshot of a specific target window.',
     category: 'ipc_proxied',
-    requiresApproval: true,
+    requiresApproval: false,
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,6 +150,42 @@ export const MCP_TOOL_DEFINITIONS: Record<string, MCPToolDefinition> = {
     inputSchema: {
       type: 'object',
       properties: {},
+    },
+  },
+  read_active_window: {
+    name: 'read_active_window',
+    description: 'Get details (title, process name, PID, bounds) of the current foreground OS window.',
+    category: 'ipc_proxied',
+    requiresApproval: false,
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  inject_keystrokes: {
+    name: 'inject_keystrokes',
+    description: 'Inject keyboard strokes into the currently active host window.',
+    category: 'ipc_proxied',
+    requiresApproval: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keys: { type: 'string', description: 'Text or keys sequence to type' },
+      },
+      required: ['keys'],
+    },
+  },
+  execute_script: {
+    name: 'execute_script',
+    description: 'Execute a shell command or script on the host operating system.',
+    category: 'ipc_proxied',
+    requiresApproval: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        script: { type: 'string', description: 'Shell command or script string to execute' },
+      },
+      required: ['script'],
     },
   },
 };

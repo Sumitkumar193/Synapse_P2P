@@ -17,6 +17,8 @@ import { SideDrawer } from './components/SideDrawer';
 import { NotificationModal } from './components/NotificationModal';
 import { ClipboardModal } from './components/ClipboardModal';
 import { SettingsPanelComponent } from './components/SettingsPanel';
+import { WhisperDownloadModalComponent } from './components/WhisperDownloadModal';
+import { telegramRelayService } from '../agent/telegram/TelegramRelayService';
 import { ClosedCaptionOverlay } from './components/ClosedCaptionOverlay';
 import { SessionEventBridge } from '../shared/SessionEventBridge';
 
@@ -24,9 +26,6 @@ import { eventBus } from '../shared/EventBus';
 import { localAudioStreamer, remoteAudioStreamer, audioStreamer } from './utils/AudioStreamer';
 
 import { SignalingMethod, ChatMessage, useAppStore } from './store/useAppStore';
-
-
-
 
 export const App: React.FC = () => {
   const sdkRef = useRef<P2PMediaSDK | null>(null);
@@ -42,7 +41,78 @@ export const App: React.FC = () => {
       panel.loadCurrentSettings();
       settingsRef.current = panel;
     }
+
+    const downloadModalContainer = document.getElementById('whisperDownloadModalContainer');
+    if (downloadModalContainer) {
+      const downloadModal = new WhisperDownloadModalComponent();
+      downloadModal.mount(downloadModalContainer);
+
+      // Startup settings & model check on boot
+      if (typeof window !== 'undefined' && (window as any).electronAPI?.getSettings) {
+        (window as any).electronAPI.getSettings().then(async (settings: any) => {
+          if (settings) {
+            telegramRelayService.updateFromSettings(settings);
+          }
+          if (settings && settings.whisperProvider === 'local' && (window as any).electronAPI?.checkModelExists) {
+            const modelName = settings.localWhisperModel || 'tiny';
+            const isMultilingual = settings.whisperMultilingual !== false;
+            try {
+              const check = await (window as any).electronAPI.checkModelExists(modelName, isMultilingual);
+              if (!check.exists) {
+                console.log(`[Boot] Model '${modelName}' (${check.fileName}) not found locally. Triggering auto-download...`);
+                downloadModal.show(modelName, check.fileName);
+                await (window as any).electronAPI.downloadWhisperModel(modelName, isMultilingual);
+              }
+            } catch (err) {
+              console.warn('[Boot] Error during model check:', err);
+            }
+          }
+        }).catch(console.error);
+      }
+    }
+
+    // Register Hotkey Listeners (Ctrl+Shift+S for General AI | Ctrl+1 for Quiz/MCQ Mode)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+      if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        console.log('[Renderer 📸] Hotkey Ctrl+Shift+S pressed in app window!');
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.triggerScreenshotAi) {
+          useAppStore.getState().setIsAiHelperActive(true);
+          (window as any).electronAPI.triggerScreenshotAi();
+          useAppStore.getState().showNotice('📸 Active Screen Screenshot captured and sent to AI Copilot!', 'Shortcut Triggered (Ctrl+Shift+S)');
+        }
+      } else if (isCmdOrCtrl && e.key === '1') {
+        e.preventDefault();
+        console.log('[Renderer 🎯] Hotkey Ctrl+1 pressed!');
+        if (typeof window !== 'undefined' && (window as any).electronAPI?.triggerScreenshotAi) {
+          useAppStore.getState().setIsAiHelperActive(true);
+          const promptText = 'Analyze the attached screenshot. IF it is a quiz/multiple-choice question, state the CORRECT option clearly first. IF it is a coding problem (e.g. LeetCode, HackerRank, IDE), detect the active coding language selected in the editor header (e.g. JavaScript/Node.js, Python, C++, Java, TypeScript) or starter code, and provide the MINIMAL working code solution strictly in that detected language with concise inline comments explaining why.';
+          (window as any).electronAPI.triggerScreenshotAi(promptText);
+          useAppStore.getState().showNotice('🎯 Screen Screenshot captured and sent to AI Copilot!', 'Shortcut Triggered (Ctrl+1)');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Register IPC listener when globalShortcut fires from main process
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.onShortcutTriggered) {
+      (window as any).electronAPI.onShortcutTriggered((data?: any) => {
+        useAppStore.getState().setIsAiHelperActive(true);
+        const isQuiz = data?.mode === 'quiz';
+        const label = isQuiz ? '🎯 Quiz Question Screenshot captured!' : '📸 Active Screen Screenshot captured!';
+        const tag = isQuiz ? 'Quiz Shortcut (Ctrl+1)' : 'System Shortcut (Ctrl+Shift+S)';
+        useAppStore.getState().showNotice(label, tag);
+      });
+    }
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
+
+
 
 
   // Zustand State Selectors
@@ -51,6 +121,7 @@ export const App: React.FC = () => {
   const selectedSourceId = useAppStore((state) => state.selectedSourceId);
   const signalingMethod = useAppStore((state) => state.signalingMethod);
   const enableHosting = useAppStore((state) => state.enableHosting);
+  const isAiHelperActive = useAppStore((state) => state.isAiHelperActive);
   const isHosting = useAppStore((state) => state.isHosting);
   const isViewing = useAppStore((state) => state.isViewing);
   const sessionCode = useAppStore((state) => state.sessionCode);
@@ -575,7 +646,19 @@ export const App: React.FC = () => {
       />
 
 
-      <div className="app-body">
+      <div className={`app-body ${isSidePanelOpen && isAiHelperActive ? 'chat-expanded' : ''}`}>
+        {/* Full-width Chat Drawer at top ONLY when AI Listening is active */}
+        {isSidePanelOpen && isAiHelperActive && (
+          <div className="full-width-drawer-container">
+            <SideDrawer
+              onSendMessage={handleSendMessage}
+              onSendFile={handleSendFile}
+              onSyncClipboard={handleSyncClipboard}
+              onClose={() => setIsSidePanelOpen(false)}
+            />
+          </div>
+        )}
+
         <div className="app-main-content">
           {!isViewing ? (
             <div className="compact-container">
@@ -617,8 +700,8 @@ export const App: React.FC = () => {
           )}
         </div>
 
-        {/* SIDEBAR FLEX PANEL - Rendered side-by-side on both Host & Viewer */}
-        {isSidePanelOpen && (
+        {/* Standard compact 340px sidebar when AI is stopped or user opens side drawer manually */}
+        {isSidePanelOpen && !isAiHelperActive && (
           <SideDrawer
             onSendMessage={handleSendMessage}
             onSendFile={handleSendFile}
@@ -645,6 +728,7 @@ export const App: React.FC = () => {
       />
 
       <div id="settingsContainer"></div>
+      <div id="whisperDownloadModalContainer"></div>
     </>
   );
 

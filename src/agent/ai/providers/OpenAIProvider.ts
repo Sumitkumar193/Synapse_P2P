@@ -13,24 +13,37 @@ export class OpenAIProvider implements ILLMProvider {
   public async complete(messages: LLMMessage[], options: LLMOptions = {}): Promise<LLMResponse> {
     const key = this.apiKey || process.env.OPENAI_API_KEY;
 
-    // Offline / Mock fallback if no API key present during local test execution
     if (!key) {
-      const lastUserMsg = messages.filter((m) => m.role === 'user').pop()?.content || '';
-      return {
-        content: `[OpenAI Mock Response] Analyzed request: ${lastUserMsg}. Recommendation: Use CAP theorem principles (Consistency vs Availability under Partition).`,
-        usage: { promptTokens: 10, completionTokens: 25, totalTokens: 35 },
-      };
+      throw new Error('[OpenAI Error] Missing OPENAI_API_KEY. Please configure your key in Settings or .env file.');
     }
+
 
     const endpoint = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const model = options.model || 'gpt-4o-mini';
 
     const payload: any = {
       model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: messages.map((m) => {
+        if (m.images && m.images.length > 0) {
+          const contentParts: any[] = [{ type: 'text', text: m.content }];
+          m.images.forEach((img) => {
+            contentParts.push({
+              type: 'image_url',
+              image_url: {
+                url: `data:${img.mimeType || 'image/jpeg'};base64,${img.data}`,
+              },
+            });
+          });
+          return {
+            role: m.role,
+            content: contentParts,
+          };
+        }
+        return {
+          role: m.role,
+          content: m.content,
+        };
+      }),
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 1000,
     };

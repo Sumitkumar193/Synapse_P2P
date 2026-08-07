@@ -10,8 +10,15 @@ export interface ElectronAPI {
   writeClipboardText: (text: string) => void;
   getSettings: () => Promise<any>;
   saveSettings: (settings: any) => Promise<any>;
+  checkModelExists: (modelName: string, isMultilingual?: boolean) => Promise<{ exists: boolean; filePath?: string; fileName: string }>;
+  downloadWhisperModel: (modelName: string, isMultilingual?: boolean) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  onModelDownloadProgress: (callback: (progress: any) => void) => () => void;
   sendAudioChunk: (buffer: ArrayBuffer) => void;
   onTranscript: (callback: (evt: any) => void) => void;
+  onChatMessage: (callback: (msg: any) => void) => void;
+  triggerScreenshotAi: (prompt?: string) => Promise<any>;
+  onShortcutTriggered: (callback: (data?: any) => void) => void;
+
   signaling: {
     joinRoom: (roomId: string, peerId: string) => void;
     leaveRoom: (roomId: string, peerId: string) => void;
@@ -30,11 +37,26 @@ const electronAPI: ElectronAPI = {
   writeClipboardText: (text: string) => ipcRenderer.send('WRITE_CLIPBOARD', text),
   getSettings: () => ipcRenderer.invoke('GET_SETTINGS'),
   saveSettings: (settings: any) => ipcRenderer.invoke('SAVE_SETTINGS', settings),
+  checkModelExists: (modelName: string, isMultilingual?: boolean) => ipcRenderer.invoke('CHECK_MODEL_EXISTS', { modelName, isMultilingual }),
+  downloadWhisperModel: (modelName: string, isMultilingual?: boolean) => ipcRenderer.invoke('DOWNLOAD_WHISPER_MODEL', { modelName, isMultilingual }),
+  onModelDownloadProgress: (callback: (progress: any) => void) => {
+    const handler = (_event: any, progress: any) => callback(progress);
+    ipcRenderer.on('WHISPER_MODEL_DOWNLOAD_PROGRESS', handler);
+    return () => ipcRenderer.removeListener('WHISPER_MODEL_DOWNLOAD_PROGRESS', handler);
+  },
   sendAudioChunk: (buffer: ArrayBuffer, speaker: 'local' | 'remote' = 'local') => ipcRenderer.send('AUDIO_CHUNK', { buffer, speaker }),
 
   onTranscript: (callback: (evt: any) => void) => {
     ipcRenderer.on('TRANSCRIPT_EVENT', (_event, evt) => callback(evt));
   },
+  onChatMessage: (callback: (msg: any) => void) => {
+    ipcRenderer.on('CHAT_MESSAGE_RECEIVED', (_event, msg) => callback(msg));
+  },
+  triggerScreenshotAi: (prompt?: string) => ipcRenderer.invoke('TRIGGER_SCREENSHOT_AI', prompt),
+  onShortcutTriggered: (callback: (data?: any) => void) => {
+    ipcRenderer.on('SHORTCUT_TRIGGER_SCREENSHOT_AI', (_event, data) => callback(data));
+  },
+
   signaling: {
     joinRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_JOIN_ROOM', { roomId, peerId }),
     leaveRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_LEAVE_ROOM', { roomId, peerId }),

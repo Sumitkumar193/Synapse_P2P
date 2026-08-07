@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "synapse-p2p": {
+      "command": "npx",
+      "args": ["tsx", "src/agent/mcp/mcpServer.ts"],
+      "env": {
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}

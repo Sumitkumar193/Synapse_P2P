@@ -218,14 +218,17 @@ export class MCPAdapter {
   private async executeWorkerLocalTool(toolName: string, args: Record<string, any>): Promise<any> {
     switch (toolName) {
       case 'send_chat':
+        const chatText = args.text || args.message || '';
+        console.log('[MCPAdapter 📩] Executing "send_chat" tool, emitting chat_received on EventBus:', chatText.substring(0, 60));
         eventBus.emit('chat_received', {
           id: `msg_${Math.random().toString(36).substring(2, 9)}`,
           sender: args.sender || 'MCP Agent',
-          text: args.message,
+          text: chatText,
           timestamp: Date.now(),
           isAi: true,
         });
         return { success: true, message: 'Chat message posted' };
+
 
       case 'get_transcripts':
         return { transcripts: [{ text: 'Sample session transcript', speaker: 'interviewer' }] };

@@ -14,6 +14,8 @@ export interface EventMap {
   'cc.chat.local': { text: string; tag: string; timestamp: number };
   'cc.chat.remote': { text: string; tag: string; timestamp: number };
   'transcript.pause': { timestamp: number };
+  'transcript.clear': { timestamp: number };
+  'ai.trigger_screen_analysis': { prompt?: string; speaker?: string; timestamp?: number };
 }
 
 

@@ -131,9 +131,29 @@ export class ChatStreamComponent {
     return `
       <div class="chat-msg-bubble ${cssClass}">
         <div class="chat-msg-sender">${m.sender} <span class="chat-msg-time">${new Date(m.timestamp).toLocaleTimeString()}</span></div>
-        <div class="chat-msg-text">${m.text}</div>
+        <div class="chat-msg-text">${this.renderMarkdownHtml(m.text)}</div>
       </div>
     `;
+  }
+
+  private renderMarkdownHtml(text: string): string {
+    if (!text) return '';
+
+    let escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    escaped = escaped.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      return `<div style="margin: 8px 0; background: #090d16; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; overflow: hidden; font-family: monospace; font-size: 0.82rem;">${lang ? `<div style="padding: 3px 8px; background: rgba(255,255,255,0.06); border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 0.7rem; color: #818cf8; font-weight: bold; text-transform: uppercase;">${lang}</div>` : ''}<pre style="margin: 0; padding: 8px 10px; overflow-x: auto; color: #e2e8f0; white-space: pre-wrap;"><code>${code}</code></pre></div>`;
+    });
+
+    escaped = escaped.replace(/`([^`]+)`/g, '<code style="background: rgba(99, 102, 241, 0.18); border: 1px solid rgba(129, 140, 248, 0.3); color: #a5b4fc; padding: 1px 5px; border-radius: 4px; font-family: monospace;">$1</code>');
+    escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong style="color: #f8fafc; font-weight: 700;">$1</strong>');
+    escaped = escaped.replace(/^\s*[-*]\s+(.*)$/gm, '<div style="display: flex; gap: 6px; margin: 2px 0 2px 6px;"><span style="color: #818cf8; font-weight: bold;">•</span><span>$1</span></div>');
+    escaped = escaped.replace(/\n/g, '<br/>');
+
+    return escaped;
   }
 
   private bindEvents(): void {

@@ -1,57 +1,95 @@
-# 📺 P2P Screen Share App & Live AI Interview Copilot Platform `v1.0.0`
+# 📺 Synapse P2P Media SDK & Live AI Interview Copilot Platform `v1.0.0`
 
-A production-grade, frameless **Electron P2P Screen Sharing Application, Media SDK & Live AI Interview Copilot Platform** built with **TypeScript**, **React 18**, and **Zustand**. Features end-to-end encrypted WebRTC audio and video streaming, local/cloud Whisper Speech-to-Text transcription, decoupled LLM engines (OpenAI, Ollama, Claude CLI), declarative workflow automation, an in-memory Model Context Protocol (MCP) tool adapter, isolated Node.js VM plugin sandboxing, and a persistent glassmorphic Settings Panel.
+A production-grade, frameless **Electron P2P Screen Sharing Application, Media SDK & Live AI Interview Copilot Platform** built with **TypeScript**, **React 18**, and **Zustand**. Features end-to-end encrypted WebRTC audio and video streaming, modular Speech-to-Text engines (OpenAI Whisper Cloud, Groq LPU Whisper, Local C++ Whisper), decoupled LLM engines (Google Gemini Direct, OpenAI GPT-4o, Ollama, Antigravity), system-wide hotkey shortcuts (`Ctrl+1`, `Ctrl+Shift+S`), active coding language auto-detection, fast-paced interview bullet-point formatting, Telegram AI channel broadcasting, centralized JSON prompt management, multi-turn conversation memory, Model Context Protocol (MCP) tool integration, token-optimized context scoping, rich Markdown chat rendering, and a dynamic responsive UI layout.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Features & Architectural Highlights
+
+### ⌨️ Instant Keyboard Hotkeys & Active Coding Language Detection
+* **🎯 Dedicated Quiz & Coding Shortcut (`Ctrl + 1` / `Cmd + 1`)**:
+  * Works **system-wide** (even when the application is in the background or minimized).
+  * Captures active screen screenshot at 960×540 JPEG and analyzes the question instantly.
+  * **Quiz Mode**: Outputs the correct option clearly first, followed by a brief 1-2 sentence explanation.
+  * **Coding Mode**: Outputs the minimal working solution with surgical comments.
+* **📸 General Coding & Surgical Debug Shortcut (`Ctrl + Shift + S` / `Cmd + Shift + S`)**:
+  * Captures active screen context and provides 1-3 line surgical bug fixes or clean algorithms.
+* **🌐 Active Programming Language Auto-Detection**:
+  * Automatically reads the active language selected in the editor header (e.g. `JavaScript`, `Node.js`, `Python3`, `C++`, `Java`, `TypeScript`) or template code signature, and writes the solution strictly in that detected language.
+
+---
+
+### ⚡ Fast-Paced Interview Bullet-Point Formatting
+* **🚫 Zero Dense Paragraphs**:
+  * Eliminates walls of text that are impossible to read under interview time pressure.
+* **🎯 Bold Lead-In Keywords for 2-Second Visual Scanning**:
+  * Starts every bullet point with a bold category lead-in (`**Core Concept**:`, `**Time Complexity**:`, `**Space Complexity**:`, `**Key Trade-off**:`).
+* **💬 Surgical Code Comments**:
+  * Inline comments explain *why* logic was chosen (`// lookup complement in O(1)`), allowing candidates to speak naturally while typing.
+
+---
+
+### 🤖 Modular AI Engine & Provider Registries (`ILLMProvider` & `ITranscriptionProvider`)
+* **🧩 Modular LLM Provider Factory (`LLMProviderFactory.ts`)**:
+  * **Google Gemini Direct API (Fast Path)**: Sub-500ms response time using `gemini-flash-lite-latest` and `gemini-3.5-flash` with direct REST endpoints.
+  * **OpenAI GPT-4o / GPT-4o-mini**: OpenAI Chat Completions REST provider with multimodal vision (`image_url`) support.
+  * **Local Ollama LLM**: Offline local inference via `http://127.0.0.1:11434` (`llama3.2`, `mistral`).
+  * **Antigravity Copilot Provider**: Integrated agentic assistant mode.
+  * **Zero-Code `.env` Switching**: Switch LLM providers seamlessly by changing `LLM_PROVIDER=openai` or `LLM_PROVIDER=gemini` in `.env`.
+* **🎙️ Modular Speech-to-Text Engine (`TranscriptionProviderFactory.ts`)**:
+  * **OpenAI Cloud Whisper API**: High-accuracy cloud STT with technical domain prompt guiding.
+  * **Groq LPU Cloud Whisper (`whisper-large-v3`)**: Sub-100ms ultra-fast LPU hardware accelerated STT (`https://api.groq.com/openai/v1`).
+  * **Local Offline C++ Whisper**: Native `whisper-cli.exe` C++ binary running `ggml-tiny.en.bin` for 100% offline, privacy-first transcription.
+
+---
+
+### 📡 Modular Broadcaster Framework & Telegram Relay
+* **🔌 Fan-Out Observer Pattern (`IBroadcastProvider` & `BroadcastManager`)**:
+  * Extensible broadcast architecture allowing real-time AI answers to be fan-out relayed to external communication channels.
+* **✈️ Telegram Bot API Provider (`TelegramBroadcastProvider.ts`)**:
+  * Real-time HTML-formatted broadcast of AI responses to designated Telegram channels or chat groups.
+  * Configurable under **Settings Panel -> Connectors & Integrations** with live test button.
+
+---
+
+### 🧠 Centralized Prompt Management & Multi-Turn Conversation Memory
+* **📋 Centralized Prompt Store (`prompts.json`)**:
+  * Single point of truth for all system prompts (`intentClassifier`, `technicalAssistant`) and STT terminology guides (`technicalVocabularyGuide`).
+  * Enriched dictionary covering AI/LLM/RAG, Python, Node.js, React.js, and CS core topics.
+* **💬 Multi-Turn Conversation Memory (Up to 10 Q&A Turns)**:
+  * Stateful 20-message (10 Q&A turns) conversation window allowing natural follow-up questions (*"How does it scale?"*, *"Compare it to Memcached"*).
+  * Automatically resets when the user clicks **"Clear Log"**.
+* **⚡ Token & Memory Optimization**:
+  * Past turns store clean text Q&A pairs only. Heavy base64 images and raw clipboard dumps are omitted from past history turns.
+
+---
+
+### 🎙️ Advanced VAD & Diagnostic Metrics
+* **📊 Live VAD Metrics**:
+  * Tracks and logs `Peak RMS`, `Trigger RMS`, `NoiseFloor`, and `Dynamic Threshold` on every speech event.
+* **🛡️ Enhanced Noise Immunity**:
+  * Dynamic threshold set to `Math.max(300, NoiseFloor * 2.2)` to eliminate room fan noise, keyboard clicks, and breath intake triggers.
+
+---
+
+### 🎨 Rich Markdown Chat UI & Dynamic Screen Layout
+* **💻 Custom React Markdown Renderer**: Renders AI answers with syntax-styled code containers, inline code pills (`code`), bold titles, and bullet lists.
+* **📐 Dynamic Top Full-Width Screen Spreading**:
+  * **Active AI Mode**: Chat UI automatically expands to **100% full screen width** at the top (`max-width: 1100px`), giving maximum room for code blocks and technical responses.
+  * **Stopped AI Mode**: Reverts back to compact sidebar layout.
+
+---
 
 ### 📺 P2P Media & WebRTC SDK
-* **⚛️ React 18 + Zustand Architecture**: Ultra-modern, responsive front-end powered by React 18 and centralized Zustand (`useAppStore`) state management.
-* **🔑 8-Character Base36 Session Codes**: Generate 8-character codes (`a7k9-x2p4`) with **2.82 Trillion combinations ($36^8$)** for high-entropy security.
-* **🔒 End-to-End Encrypted (E2EE) WebRTC**: High-framerate video and system + microphone audio streamed directly peer-to-peer (DTLS-SRTP).
+* **⚛️ React 18 + Zustand Architecture**: Powered by React 18 and centralized Zustand (`useAppStore`) state management.
+* **🔑 8-Character Base36 Session Codes**: High-entropy session codes (`a7k9-x2p4`) with **2.82 Trillion combinations ($36^8$)**.
+* **🔒 End-to-End Encrypted (E2EE) WebRTC**: High-framerate video and audio streamed directly peer-to-peer (DTLS-SRTP).
 * **🎛️ Dynamic Signaling Provider & Auto Cascade**:
-  * ⚡ **Auto Priority Cascade** (Multi-Provider Room Probing across Firebase > WebSockets > WebTorrents > Electron IPC > Memory).
-  * 🔥 **Firebase Realtime DB** (Serverless HTTPS / SSE Port 443 — `synapse-p2p`).
-  * 🌐 **WebSocket Server** (Custom WSS Port 443).
-  * 🌀 **WebTorrent Tracker Mesh** (Simultaneous multi-tracker WebSocket mesh broadcasting).
-  * 💻 **Electron IPC** (Direct 0ms local loopback).
-* **🌐 WebRTC ICE & NAT Traversal Pipeline**: Direct Host LAN, STUN Public WAN NAT Hole Punching (`stun.cloudflare.com:3478`), and metered TURN Relay fallback.
+  * ⚡ **Auto Priority Cascade** (Firebase > WebSockets > WebTorrents > Electron IPC > Memory).
 
 ---
 
-### 🤖 Live AI Copilot & Workflow Engine Architecture
-* **🎙️ Speech-To-Text (Whisper) Engine & Audio Streamer**:
-  * **WebAudio PCM Streamer (`AudioStreamer.ts`)**: Real-time 16kHz Int16 mono PCM audio capture from local microphone or remote WebRTC audio streams using WebAudio `AudioContext`.
-  * **Electron IPC Audio & Transcript Relay**: Direct IPC pipeline (`sendAudioChunk` / `onTranscript`) streaming PCM audio chunks to main process `AudioWorkerController` and broadcasting `transcript.partial` / `transcript.final` back to all active windows.
-  * **Local STT**: Native C++ `whisper-cli.exe` integration running bundled `ggml-tiny.en.bin` model files (~2ms inference execution time).
-  * **Cloud STT**: OpenAI Cloud Audio Whisper API integration.
-  * **LocalAgreement-n Filter**: Real-time transcript stabilization filter emitting instant `transcript.partial` and verified `transcript.final` events.
-  * **💬 Live Closed Caption (CC) Chat Sync**: Automatically formats final speech transcripts into live chat entries (`🎙️ [CC - Me]` / `🎙️ [CC - Received]`) in `SessionEventBridge`.
-* **🧠 Decoupled LLM Engine (`ILLMProvider`)**:
-  * **OpenAI REST API** (`gpt-4o-mini`, `gpt-4o`).
-  * **Ollama Local LLM** (`http://localhost:11434` — `llama3.2`, `mistral`).
-  * **Claude System CLI** (`claude` command execution).
-* **⚡ Declarative Workflow Engine**: Matches event triggers against rules and routes sensitive tool actions to the Pending Approval Queue.
-* **🔌 Embedded In-Memory MCP Adapter**:
-  * JSON-RPC 2.0 implementation (`initialize`, `tools/list`, `tools/call`) managing 12 MCP tools.
-  * **Category A (Worker-Local)**: `send_chat`, `chat_history`, `participants`, `summarize_session`.
-  * **Category B (IPC-Proxied OS Tools)**: `capture_screen`, `capture_window`, `clipboard_read`, `clipboard_write`, `recording_start`, `recording_stop`.
-* **🛡️ Plugin Sandbox Architecture**:
-  * Isolated Node.js `node:vm` sandbox hiding dangerous host modules (`fs`, `net`, `child_process`).
-  * **Per-Plugin Crash Shielding** (`try/catch` wrapper) preventing faulty plugin code from crashing host windows or media feeds.
-  * **Strict Timeout Enforcement** (100ms infinite loop protection).
-  * Capability-Scoped API Bridge (`api.registerTool`, `api.onEvent`, `api.emitEvent`, `api.log`).
-* **⚙️ Dynamic Settings Panel & Preferences Store**:
-  * Persistent storage (`app_preferences.json`) in Electron `userData` directory.
-  * Glassmorphism Settings modal UI for configuring STT models, LLM providers, API keys, CPU threads, auto-opening chat panels, dual sharing join panels, and MCP servers without hardcoded environment variables.
-  * Streamlined **Navbar Dropdown Menu (`⚙️ Menu ▾`)** in top titlebar.
-
----
-
-## 🏗️ Platform Architecture Diagram
-
-![Platform High-Level Architecture Diagram](./assets/architecture_diagram.jpg)
+## 🏗️ System Architecture Diagram
 
 ```mermaid
 graph TD
@@ -64,28 +102,35 @@ graph TD
         RealtimeBus["RealtimeBus Server\n(127.0.0.1 HTTP/WS)"]
         IPCProxy["MainIPCProxyHandler\n(Category B OS Tools)"]
         Settings["SettingsManager\n(app_preferences.json)"]
+        Hotkeys["Global Shortcuts\n(Ctrl+1 / Ctrl+Shift+S)"]
     end
 
     subgraph ENGINE_LAYER["⚙️ Worker & Engine Layer"]
-        WhisperSTT["Whisper STT Engine\n(LocalAgreement-n Filter)"]
+        WhisperSTT["STT Engine Factory\n(OpenAI Cloud / Groq LPU / Local C++)"]
         Workflow["Workflow Engine\n(Trigger -> Rule -> Action)"]
-        LLM["AgentWorker / LLM Engine\n(OpenAI / Ollama / Claude CLI)"]
+        LLM["LLM Provider Factory\n(Gemini Direct / OpenAI GPT-4o / Ollama)"]
         MCP["In-Memory MCP Adapter\n(Pending Approval Queue)"]
-        Sandbox["PluginSandbox (Node.js VM)\n(Crash Shield & Timeout)"]
+        Broadcast["BroadcastManager\n(Telegram Channel Relay)"]
+        PromptsJSON["Centralized Prompts Store\n(prompts.json)"]
     end
 
     subgraph RENDERER["⚛️ Renderer UI Layer"]
-        ChatUI["SideDrawer & Chat Stream"]
+        ChatUI["SideDrawer & Full-Width Chat Stream\n(Rich Markdown Renderer)"]
         Overlay["Closed Caption Overlay"]
-        SettingsUI["Glassmorphic Settings Panel"]
+        Dashboard["Dynamic Responsive Dashboard Grid"]
     end
 
     MediaStream -->|PCM Audio Taps| AudioWorker
     AudioWorker -->|Audio Chunks| RealtimeBus
     RealtimeBus -->|WS Events| WhisperSTT
     WhisperSTT -->|Transcripts| Workflow
+    Hotkeys -->|Trigger Screen AI| Workflow
     Workflow -->|Trigger Actions| LLM
+    PromptsJSON -.->|System Prompts & Terminology| LLM
+    PromptsJSON -.->|Vocabulary Guide| WhisperSTT
     LLM -->|Tool Calls| MCP
+    LLM -->|AI Answers| Broadcast
+    Broadcast -->|Relay Message| Telegram["✈️ Telegram Channel"]
     MCP -->|OS Tool IPC| IPCProxy
     MCP -->|Approval Cards / Chat| ChatUI
     WhisperSTT -->|Live Subtitles| Overlay
@@ -93,139 +138,42 @@ graph TD
 
 ---
 
-### 🔌 Model Context Protocol (MCP) Execution Flow
-
-![Model Context Protocol (MCP) Flow Diagram](./assets/mcp_flow_diagram.jpg)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as AI Agent / Claude CLI
-    participant MCP as Embedded In-Memory MCP Adapter
-    participant Queue as Pending Approval Queue
-    participant LocalTools as Category A (Worker Local)
-    participant IPC as MainIPCProxyHandler (OS Tools)
-    participant UI as In-App Chat / SideDrawer
-
-    Client->>MCP: 1. JSON-RPC `initialize` & `tools/list`
-    MCP-->>Client: 2. Return 12 Zod Tool Schemas & `requiresApproval` metadata
-
-    Client->>MCP: 3. JSON-RPC `tools/call` (e.g. `capture_screen`)
-    
-    alt requiresApproval == true
-        MCP->>Queue: Enqueue Pending Tool Request
-        Queue->>UI: Emit `tool_pending_approval` card
-        UI-->>Queue: User clicks [Approve]
-        Queue-->>MCP: Resolve Approval (`tool_approved`)
-    end
-
-    alt Category A (Worker Local Tool)
-        MCP->>LocalTools: Execute In-Memory (`send_chat`, `summarize_session`)
-        LocalTools-->>MCP: Return Result Payload
-    else Category B (OS Tool)
-        MCP->>IPC: Forward IPC Request (`capture_screen`, `clipboard_read`)
-        IPC-->>MCP: Return System Buffer / Captured Data
-    end
-
-    MCP-->>Client: 4. JSON-RPC Response (Result / Status)
-```
-
----
-
-## 🚀 Quick Start
+## 🚀 Quick Start Guide
 
 ### 1. Installation
 ```bash
-git clone https://github.org/your-repo/ScreenShareApp.git
-cd ScreenShareApp
+git clone https://github.com/Sumitkumar193/Synapse_P2P.git
+cd Synapse_P2P
 npm install
 ```
 
-### 2. Run Application (Development / Start)
+### 2. Environment Configuration (`.env`)
+Create a `.env` file in the project root:
+```env
+# AI LLM Provider Selection: "openai", "gemini", "ollama", or "antigravity"
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-proj-...
+
+# Speech-to-Text Provider Selection: "openai", "groq", or "local"
+WHISPER_PROVIDER=openai
+OPENAI_STT_MODEL=whisper-1
+
+# Optional: Telegram Channel AI Relay Broadcast
+ENABLE_TELEGRAM_RELAY=true
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_CHAT_ID=-1001234567890
+```
+
+### 3. Build & Run
 ```bash
-npm run start
+# Build TypeScript and bundle dist via esbuild
+npm run build
+
+# Start Electron application
+npm start
 ```
-
-### 3. Run Automated Test Suite (93 Assertions)
-```bash
-npm test
-```
-*Executes 19-section automated verification suite testing P2P WebRTC SDK, priority fallback signaling, audio pipeline, Whisper STT, LLM providers, Workflow Engine, MCP Adapter, Plugin Sandbox, IPC Proxy, and Settings Store.*
-
----
-
-## 📁 Repository Architecture
-
-```text
-ScreenShareApp/
-├── assets/                         # Application Icon & Native Whisper Binary assets
-│   ├── icon.jpg                    # Custom 3D P2P App Icon
-│   ├── sample/                     # Sample audio files (spoken_sample.wav, Sulafat.mp3, Umbriel.mp3)
-│   └── whisper/                    # Native whisper-cli.exe & ggml-tiny.en.bin model
-├── FRD.md                          # Functional Requirements Document
-├── release/                        # Packaged Standalone Portable Output
-│   └── P2PScreenShare-Portable.zip # Standalone Portable Executable Zip
-├── src/
-│   ├── agent/                      # AI Agent Architecture
-│   │   ├── ai/                     # LLM Providers (OpenAI, Ollama, Claude CLI)
-│   │   ├── mcp/                    # Embedded In-Memory MCP Adapter & Approval Queue
-│   │   └── transcription/          # Speech-To-Text Providers & LocalAgreement-n
-│   ├── main/                       # Electron Main Process
-│   │   ├── index.ts                # App lifecycle, Frameless Titlebar & IPC Setup
-│   │   ├── ipcProxy.ts             # Main-Process Security IPC Proxy for OS Tools
-│   │   ├── settingsManager.ts      # Persistent Preferences Store (userData/app_preferences.json)
-│   │   └── ipc/                    # Main IPC Handlers
-│   ├── plugin/                     # Plugin Sandbox Architecture
-│   │   ├── PluginSandbox.ts        # Isolated Node.js vm Sandbox with Crash Shield & Timeouts
-│   │   ├── PluginManager.ts        # Lifecycle Manager & Capability-Scoped API Bridge
-│   │   └── builtin/                # Built-in Plugins (AutoSummaryPlugin)
-│   ├── realtime/                   # Realtime Bus & Audio Pipeline
-│   │   ├── RealtimeBus.ts          # 127.0.0.1 Loopback WebSocket/HTTP Server
-│   │   └── RingBuffer.ts           # 1MB PCM RingBuffer with drop-oldest backpressure
-│   ├── shared/                     # Shared Foundations
-│   │   ├── Container.ts            # Lightweight DI Service Container
-│   │   ├── EventBus.ts             # Strongly-typed Pub/Sub Event Bus
-│   │   ├── SessionEventBridge.ts   # P2P DataChannel closed caption & MCP RPC bridge
-│   │   ├── settings.ts             # AppSettings Schema & Default Preferences
-│   │   └── tools.ts                # 12 MCP Tool Definitions & Zod Schemas
-│   ├── workers/                    # Worker Controllers
-│   │   ├── agentWorker.ts          # AgentWorkerController (LLM + Workflow Engine)
-│   │   └── audioWorker.ts          # AudioWorkerController (PCM Audio Pipeline)
-│   ├── preload/
-│   │   └── index.ts                # ContextBridge IPC APIs (getSettings, saveSettings, sendAudioChunk, onTranscript)
-│   ├── renderer/                   # Front-End UI (React 18 + Zustand)
-│   │   ├── index.html              # Glassmorphic layout & responsive CSS styling
-│   │   ├── index.tsx               # React 18 DOM mount script
-│   │   ├── App.tsx                 # Root React container & SDK event handling
-│   │   ├── utils/                  # Front-End Utilities
-│   │   │   └── AudioStreamer.ts    # WebAudio 16kHz PCM audio stream recorder
-│   │   └── components/             # UI Components
-│   │       ├── TitleBar.tsx        # TitleBar with clean Navbar Dropdown Menu (⚙️ Menu ▾)
-│   │       ├── ChatStream.ts       # Glassmorphic Chat Bar & Inline Approval Prompt Cards
-│   │       ├── SettingsPanel.ts    # Preferences & AI Settings Modal Component
-│   │       ├── SideDrawer.tsx      # Unified Chat & Closed Caption Drawer Panel
-│   │       ├── HostCard.tsx        # Screen share setup & session code display
-│   │       └── StreamView.tsx      # WebRTC stream viewport & control bar
-│   └── sdk/                        # Core P2P Media SDK
-├── test/
-│   └── index.ts                    # Automated 19-Section Dual-SDK Test Suite (93 PASSED)
-└── package.json                    # Scripts and dependencies
-```
-
----
-
-## 📜 Essential Scripts Reference
-
-| Script | Command | Description |
-| :--- | :--- | :--- |
-| `npm run start` | `npm run build && electron .` | Launch Electron desktop application |
-| `npm run build` | `esbuild & tsc` | Bundle main, preload, and renderer React TSX source |
-| `npm test` | `tsx test/index.ts` | Run 19-section automated verification test suite (93 PASSED) |
-| `npm run typecheck` | `tsc --noEmit` | Check TypeScript type safety |
-| `npm run package:portable` | `electron-packager & Compress-Archive` | Build portable ZIP package (`release/P2PScreenShare-Portable.zip`) |
-| `npm run clean` | `rimraf dist release` | Clean compiled output directories |
 
 ---
 
 ## 📄 License
-MIT License
+MIT License. Built for high-performance P2P screen sharing and live AI technical interview assistance.

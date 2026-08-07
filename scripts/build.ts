@@ -14,6 +14,13 @@ function build() {
     { stdio: 'inherit', cwd: PROJECT_ROOT }
   );
 
+  console.log('[Build] ⚡ Step 2b: Bundling MCP Server process...');
+  execSync(
+    'npx esbuild src/agent/mcp/mcpServer.ts --bundle --platform=node --target=node20 --outfile=dist/main/mcpServer.js --external:electron',
+    { stdio: 'inherit', cwd: PROJECT_ROOT }
+  );
+
+
   console.log('[Build] ⚡ Step 3: Bundling Preload script...');
   execSync(
     'npx esbuild src/preload/index.ts --bundle --platform=node --target=node20 --outfile=dist/preload/index.js --external:electron',
