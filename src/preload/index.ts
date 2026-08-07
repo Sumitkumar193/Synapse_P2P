@@ -18,6 +18,8 @@ export interface ElectronAPI {
   onChatMessage: (callback: (msg: any) => void) => void;
   triggerScreenshotAi: (prompt?: string) => Promise<any>;
   onShortcutTriggered: (callback: (data?: any) => void) => void;
+  processPdfResume: (base64Pdf: string) => Promise<{ success: boolean; text?: string; error?: string }>;
+  saveResumeMarkdown: (markdownText: string) => Promise<{ success: boolean; error?: string }>;
 
   signaling: {
     joinRoom: (roomId: string, peerId: string) => void;
@@ -56,6 +58,8 @@ const electronAPI: ElectronAPI = {
   onShortcutTriggered: (callback: (data?: any) => void) => {
     ipcRenderer.on('SHORTCUT_TRIGGER_SCREENSHOT_AI', (_event, data) => callback(data));
   },
+  processPdfResume: (base64Pdf: string) => ipcRenderer.invoke('PROCESS_PDF_RESUME', base64Pdf),
+  saveResumeMarkdown: (markdownText: string) => ipcRenderer.invoke('SAVE_RESUME_MARKDOWN', markdownText),
 
   signaling: {
     joinRoom: (roomId, peerId) => ipcRenderer.send('SIGNALING_JOIN_ROOM', { roomId, peerId }),

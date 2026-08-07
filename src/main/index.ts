@@ -10,8 +10,19 @@ dotenv.config();
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   console.log('[Main Process] ⛔ Another instance of P2P Screen Share is already running. Exiting secondary process...');
-  app.quit();
+  process.exit(0);
 }
+
+// When a second instance is launched, focus the existing primary window
+app.on('second-instance', () => {
+  windows.forEach((win) => {
+    if (!win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+});
 
 // Suppress Chromium internal C++ log noise (WGC static frame timeouts)
 app.commandLine.appendSwitch('log-level', '3');
@@ -53,6 +64,86 @@ ipcMain.handle('TRIGGER_SCREENSHOT_AI', async (_event, customPrompt?: string) =>
 
 ipcMain.handle('GET_REALTIME_BUS_INFO', () => {
   return realtimeBusInfo;
+});
+
+ipcMain.handle('PROCESS_PDF_RESUME', async (_event, base64Pdf: string) => {
+  try {
+    const { GeminiDirectProvider, OpenAIProvider } = require('../agent/ai');
+    let provider: any = null;
+    try {
+      provider = new GeminiDirectProvider();
+    } catch {
+      try {
+        provider = new OpenAIProvider();
+      } catch (err: any) {
+        return { success: false, error: 'No active AI Provider API Key configured. Please set GEMINI_API_KEY or OPENAI_API_KEY in .env or Settings.' };
+      }
+    }
+
+    const cleanBase64 = base64Pdf.replace(/^data:application\/pdf;base64,/, '').trim();
+    const pdfBuffer = Buffer.from(cleanBase64, 'base64');
+
+    let rawPdfText = '';
+    try {
+      const pdfStr = pdfBuffer.toString('utf8');
+      const textMatches = pdfStr.match(/\(([^)]+)\)\s*(?:Tj|TJ)/g);
+      if (textMatches) {
+        rawPdfText = textMatches
+          .map((m) => m.replace(/[()]/g, '').trim())
+          .filter((t) => t.length > 2)
+          .join(' ');
+      }
+    } catch {}
+
+    console.log('[Main Process 📄] Sending PDF resume to AI Provider (maxTokens: 8192) for content-aware extraction & RAG indexing...');
+    
+    let extractedText = '';
+    try {
+      const response = await provider.complete(
+        [
+          {
+            role: 'user',
+            content: `Extract the COMPLETE text and content of this candidate resume PDF file into clean, well-organized Markdown sections (Professional Summary, Technical Skills, Work Experience, Key Projects, Education, Certifications). Include ALL bullet points, metrics, company names, job titles, and tech stack details verbatim from top to bottom. Output clean Markdown only without any truncation or conversational chatter.`,
+            images: [
+              {
+                mimeType: 'application/pdf',
+                data: cleanBase64,
+              },
+            ],
+          },
+        ],
+        { maxTokens: 8192, temperature: 0.2 }
+      );
+      extractedText = response.content ? response.content.trim() : '';
+    } catch (aiErr: any) {
+      console.warn('[Main Process 📄] AI PDF extraction notice:', aiErr.message || aiErr);
+    }
+
+    const finalText = extractedText || rawPdfText;
+
+    if (!finalText || finalText.length < 20) {
+      return { success: false, error: 'Could not extract complete text from PDF. Please paste the resume text into the manager.' };
+    }
+
+    return { success: true, text: finalText };
+  } catch (err: any) {
+    console.error('[Main Process 📄] Error processing PDF resume via AI:', err);
+    return { success: false, error: err.message || 'Failed to process PDF resume with AI.' };
+  }
+});
+
+ipcMain.handle('SAVE_RESUME_MARKDOWN', async (_event, markdownText: string) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const resumePath = path.resolve(__dirname, '../../assets/resume.md');
+    fs.writeFileSync(resumePath, markdownText, 'utf8');
+    console.log('[Main Process 📄] Saved updated resume markdown to assets/resume.md');
+    return { success: true };
+  } catch (err: any) {
+    console.warn('[Main Process 📄] Notice writing assets/resume.md:', err.message);
+    return { success: false, error: err.message };
+  }
 });
 
 // Receive 16kHz Int16 PCM audio chunks from renderer AudioStreamer (local mic or remote speaker), feed to Whisper STT

@@ -44,8 +44,8 @@ export class OpenAIProvider implements ILLMProvider {
           content: m.content,
         };
       }),
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 1000,
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 4096,
     };
 
     if (options.tools && options.tools.length > 0) {

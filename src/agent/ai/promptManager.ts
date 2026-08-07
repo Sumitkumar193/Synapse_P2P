@@ -7,10 +7,12 @@ interface DictionaryEntry {
 }
 
 interface RawPromptsData {
-  technicalDictionary: DictionaryEntry[];
   systemPrompts: {
     intentClassifier: string;
     technicalAssistant: string;
+    behavioralFormattingRules: string;
+    generalFormattingRules: string;
+    technicalFormattingRules: string;
   };
 }
 
@@ -18,6 +20,9 @@ export interface PromptsConfig {
   systemPrompts: {
     intentClassifier: string;
     technicalAssistant: string;
+    behavioralFormattingRules: string;
+    generalFormattingRules: string;
+    technicalFormattingRules: string;
   };
   sttPrompts: {
     technicalVocabularyGuide: string;
@@ -40,23 +45,29 @@ function buildPhonemeMapping(dictionary: DictionaryEntry[]): string {
 }
 
 /**
- * Builds STT vocabulary guide from canonical names + full forms.
- * Auto-generated — no more maintaining a separate vocab list.
+ * Builds STT vocabulary guide as a concise natural prompt.
+ * Kept short (< 250 chars) to prevent Whisper prompt context overflow and repetition loop hallucinations.
  */
 function buildSttVocabulary(dictionary: DictionaryEntry[]): string {
-  const terms: string[] = [];
-  for (const entry of dictionary) {
-    terms.push(entry.canonical);
-    if (entry.fullForm) terms.push(entry.fullForm);
-  }
-  return terms.join(', ');
+  const topTerms = dictionary.slice(0, 20).map((e) => e.canonical).join(', ');
+  return `Technical interview dialogue covering ${topTerms}, system architecture, and core development.`;
 }
 
 // --- Assemble prompts at startup ---
 const raw = promptsData as unknown as RawPromptsData;
-const dictionary = raw.technicalDictionary;
-const phonemeMapping = buildPhonemeMapping(dictionary);
-const sttVocab = buildSttVocabulary(dictionary);
+
+import { dictionaries } from './speech';
+
+// Load domain-specific dictionaries into a Map
+export const dictionaryMap = new Map<string, DictionaryEntry[]>();
+for (const [domain, entries] of Object.entries(dictionaries)) {
+  dictionaryMap.set(domain, entries as DictionaryEntry[]);
+}
+
+// Combine all into a single array for phoneme mapping
+const fullDictionary = Object.values(dictionaries).flat() as DictionaryEntry[];
+const phonemeMapping = buildPhonemeMapping(fullDictionary);
+const sttVocab = buildSttVocabulary(fullDictionary);
 
 // Inject dictionary into prompt templates (single place, no duplication)
 const intentClassifier = raw.systemPrompts.intentClassifier.replace('{{SPEECH_DICTIONARY}}', phonemeMapping);
@@ -66,6 +77,9 @@ export const prompts: PromptsConfig = {
   systemPrompts: {
     intentClassifier,
     technicalAssistant,
+    behavioralFormattingRules: raw.systemPrompts.behavioralFormattingRules,
+    generalFormattingRules: raw.systemPrompts.generalFormattingRules,
+    technicalFormattingRules: raw.systemPrompts.technicalFormattingRules,
   },
   sttPrompts: {
     technicalVocabularyGuide: sttVocab,

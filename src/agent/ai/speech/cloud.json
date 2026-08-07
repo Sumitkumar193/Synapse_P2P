@@ -1,0 +1,10 @@
+[
+  { "canonical": "Nginx", "aliases": ["engine x"] },
+  { "canonical": "Docker", "aliases": [] },
+  { "canonical": "Kubernetes", "aliases": ["cube er nettys"] },
+  { "canonical": "Kafka", "aliases": [] },
+  { "canonical": "WebRTC", "aliases": [] },
+  { "canonical": "CI/CD", "aliases": ["CI CD"] },
+  { "canonical": "AWS", "aliases": [] },
+  { "canonical": "P2P", "aliases": ["peer to peer"] }
+]

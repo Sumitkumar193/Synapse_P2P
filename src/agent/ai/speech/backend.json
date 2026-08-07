@@ -1,0 +1,18 @@
+[
+  { "canonical": "Python", "aliases": [] },
+  { "canonical": "FastAPI", "aliases": ["fast a p i", "fast API"] },
+  { "canonical": "Flask", "aliases": [] },
+  { "canonical": "Django", "aliases": ["jango"] },
+  { "canonical": "uvicorn", "aliases": [] },
+  { "canonical": "Pydantic", "aliases": ["pie dantic"] },
+  { "canonical": "Celery", "aliases": [] },
+  { "canonical": "Node.js", "aliases": ["node"] },
+  { "canonical": "Express.js", "aliases": ["express"] },
+  { "canonical": "NestJS", "aliases": ["nest js"] },
+  { "canonical": "Fastify", "aliases": [] },
+  { "canonical": "gRPC", "aliases": ["G RPC"] },
+  { "canonical": "WebSockets", "aliases": ["web sockets"] },
+  { "canonical": "Gunicorn", "aliases": ["g unicorn"] },
+  { "canonical": "httpx", "aliases": ["http x"] },
+  { "canonical": "Alembic", "aliases": [] }
+]

@@ -418,6 +418,13 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
     return Buffer.concat(slices, bytesNeeded);
   }
 
+  private computeThreshold(noiseFloor: number): number {
+    const MULTIPLIER = 4.5;
+    const MIN_THRESHOLD = 150;
+    const MAX_THRESHOLD = 600;
+    return Math.min(MAX_THRESHOLD, Math.max(MIN_THRESHOLD, Math.round(noiseFloor * MULTIPLIER)));
+  }
+
   private async processNextQueueBatch(speaker: 'local' | 'remote'): Promise<TranscriptEventPayload | null> {
     if (this.pcmQueueTotalBytes < 16000) {
       return null;
@@ -432,7 +439,7 @@ export class WhisperTranscriptionProvider implements ITranscriptionProvider {
         if (!step) break;
 
         const rms = this.calculatePcmRms(step);
-        const dynamicThreshold = Math.max(this.vadThreshold, this.noiseFloorRms * 2.2);
+        const dynamicThreshold = this.computeThreshold(this.noiseFloorRms);
 
         if (rms >= dynamicThreshold) {
           // Voice activity detected! Accumulate speech audio in zero-copy chunk list

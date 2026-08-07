@@ -32,3 +32,9 @@ Thumbs.db
 # Scratch & Temporary files
 scratch/
 app_preferences.json
+
+# Confidential Candidate Resume & User Data
+resume.md
+assets/resume.md
+vendor/resume/
+*.pdf

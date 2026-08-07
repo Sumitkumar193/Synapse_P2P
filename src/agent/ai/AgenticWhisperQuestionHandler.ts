@@ -2,9 +2,11 @@ import { eventBus } from '../../shared/EventBus';
 import { MCPAdapter } from '../mcp/MCPAdapter';
 import { ILLMProvider } from './LLMInterface';
 import { prompts } from './promptManager';
+import { ResumeRAGService } from '../rag/ResumeRAGService';
 
 export interface QuestionAssertion {
   intent: string; // 'question' | 'debug' | 'solve' | 'optimize' | 'explain' | 'ignore'
+  questionType?: 'behavioral' | 'technical' | 'general';
   normalizedQuery: string;
   needsScreenContext: boolean;
   needsClipboardContext: boolean;
@@ -165,8 +167,38 @@ export class AgenticWhisperQuestionHandler {
         }
       }
 
-      // Step 3: Synthesize multimodal prompt using normalized query
-      let prompt = `User Spoken Question (${speaker}): "${normalizedQuery}"\n\n`;
+      // Step 3: Query Resume RAG Embeddings Engine
+      // Build System Message with Candidate Resume Context & Persona Directive
+      const ragService = ResumeRAGService.getInstance();
+      const resumeContent = ragService.getResumeText();
+      const ragResults = ragService.search(normalizedQuery, 3);
+      console.log(`[AgenticEvaluator 📄] Resume content length: ${resumeContent.length} chars, Chunks: ${ragService.getChunkCount()}`);
+
+      let systemContent = prompts.systemPrompts.technicalAssistant;
+      
+      // Append targeted formatting rules based on intent classification
+      if (assertion.questionType === 'behavioral') {
+        systemContent += `\n\n${prompts.systemPrompts.behavioralFormattingRules}`;
+      } else if (assertion.questionType === 'general') {
+        systemContent += `\n\n${prompts.systemPrompts.generalFormattingRules}`;
+      } else {
+        systemContent += `\n\n${prompts.systemPrompts.technicalFormattingRules}`;
+      }
+
+      if (resumeContent) {
+        systemContent += `\n\n--- CANDIDATE RESUME CONTEXT ---\n${resumeContent}`;
+        if (ragResults && ragResults.length > 0) {
+          systemContent += `\n\n--- TOP RAG RELEVANT CHUNKS ---\n`;
+          ragResults.forEach((r, idx) => {
+            systemContent += `[Chunk #${idx + 1} - ${r.chunk.title}]: ${r.chunk.content}\n`;
+          });
+        }
+        systemContent += `\n\nCANDIDATE VOICE DIRECTIVE: You are answering as the candidate in 1st-person voice ("I", "my") grounded strictly in your actual resume context above. Cite exact company names, job titles, project names, technical stack, and platform metrics from your resume. Output clean direct answers without meta-talk, advice, hints, fillers, or placeholders.`;
+      }
+
+      // Build User Message with clean spoken question and optional media/clipboard attachments
+      let userContent = `User Spoken Question (${speaker}): "${normalizedQuery}"`;
+
       let imagesList: Array<{ mimeType: string; data: string }> | undefined = undefined;
 
       if (screenshotData) {
@@ -188,25 +220,20 @@ export class AgenticWhisperQuestionHandler {
                 data: base64Data,
               },
             ];
-            prompt += `--- Active Screen Screenshot Attached Inline ---\n\n`;
-            console.log(`[AgenticEvaluator 🖼️] Active screen JPEG thumbnail attached to multimodal LLM request (${base64Data.length} chars base64).`);
+            userContent += `\n\n--- Active Screen Screenshot Attached Inline ---`;
+            console.log(`[AgenticEvaluator 🖼️] Active screen JPEG thumbnail attached (${base64Data.length} chars base64).`);
           }
-        } else {
-          console.warn('[AgenticEvaluator ⚠️] Could not extract base64 image from capture_screen output:', screenshotData);
         }
       }
 
-      // Attach clipboard context if explicitly requested by user query
       if (clipboardContext) {
-        prompt += `--- Host OS Clipboard Context ---\n${clipboardContext}\n\n`;
+        userContent += `\n\n--- Host OS Clipboard Context ---\n${clipboardContext}`;
       }
-
-      prompt += `Please provide a clear, accurate, and concise answer to the spoken question.`;
 
       const messagesToSend: any[] = [
         {
           role: 'system',
-          content: prompts.systemPrompts.technicalAssistant,
+          content: systemContent,
         },
         ...this.conversationHistory.map((h) => ({
           role: h.role,
@@ -214,7 +241,7 @@ export class AgenticWhisperQuestionHandler {
         })),
         {
           role: 'user',
-          content: prompt,
+          content: userContent,
           images: imagesList,
         },
       ];
@@ -240,11 +267,12 @@ export class AgenticWhisperQuestionHandler {
         this.conversationHistory = this.conversationHistory.slice(this.conversationHistory.length - 20);
       }
 
-      // Step 4: Post answer directly to Chat UI stream via MCP tool
+      // Step 4: Post answer directly to Chat UI stream via MCP tool with spoken question prepended
       console.log('[AgenticEvaluator 📤] Executing send_chat MCP tool to post answer to Chat UI...');
+      const questionDisplay = normalizedQuery || text;
       await this.mcpAdapter.executeTool(
         'send_chat',
-        { text: `💡 **AI Assistant Answer:**\n${answerText}` },
+        { text: `❓ **Question Asked:** "${questionDisplay}"\n\n💡 **AI Assistant Answer:**\n${answerText}` },
         'AgenticQuestionHandler'
       );
 
@@ -304,6 +332,7 @@ export class AgenticWhisperQuestionHandler {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
           intent: parsed.intent || 'question',
+          questionType: parsed.questionType,
           normalizedQuery: parsed.normalizedQuery || trimmed,
           needsScreenContext: Boolean(parsed.needsScreen),
           needsClipboardContext: Boolean(parsed.needsClipboard),
@@ -314,6 +343,7 @@ export class AgenticWhisperQuestionHandler {
       // Fallback heuristic if JSON parsing fails
       return {
         intent: 'question',
+        questionType: 'technical',
         normalizedQuery: trimmed,
         needsScreenContext: /screen|code|error|diagram|ui|window|failing|bug|fix|stuck|debug/i.test(text),
         needsClipboardContext: /clipboard|copied|paste/i.test(text),

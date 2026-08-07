@@ -68,8 +68,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   whisperThreads: 4,
   openAiApiKey: '',
 
-  llmProvider: 'antigravity',
-  openAiModel: 'gemini-3.6-flash',
+  llmProvider: 'gemini-direct',
+  openAiModel: 'gemini-3.5-flash',
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaModel: 'llama3.2',
   claudeCommand: 'claude',

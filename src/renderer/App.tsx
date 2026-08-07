@@ -498,8 +498,12 @@ export const App: React.FC = () => {
 
     useAppStore.getState().setIsAiHelperActive(true);
     if (!remoteStream || remoteStream.getAudioTracks().length === 0) {
-      console.log('[Host Mode] 🎙️ No active remote speaker stream. Starting local mic streamer...');
-      localAudioStreamer.start(stream, 'local');
+      if (useAppStore.getState().enableMicListening) {
+        console.log('[Host Mode] 🎙️ No active remote speaker stream. Starting local mic streamer...');
+        localAudioStreamer.start(stream, 'local');
+      } else {
+        console.log('[Host Mode] 🔇 Local mic streamer bypassed by user preference.');
+      }
     }
   };
 

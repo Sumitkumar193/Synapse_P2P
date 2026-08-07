@@ -20,7 +20,7 @@ export class GeminiDirectProvider implements ILLMProvider {
   constructor(config: GeminiProviderConfig = {}) {
     this.transport = new HTTPTransport();
     this.apiKey = config.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-    this.defaultModel = config.model || process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+    this.defaultModel = config.model || process.env.GEMINI_MODEL || 'gemini-3.5-flash';
   }
 
   public async complete(messages: LLMMessage[], options?: LLMOptions): Promise<LLMResponse> {
@@ -30,14 +30,13 @@ export class GeminiDirectProvider implements ILLMProvider {
       throw new Error('[Gemini Direct Error] Missing GEMINI_API_KEY. Please set GEMINI_API_KEY in your .env or Settings.');
     }
 
-    const preferredModel = options?.model || this.defaultModel || 'gemini-flash-lite-latest';
+    const preferredModel = options?.model || this.defaultModel || 'gemini-3.5-flash';
     const modelsToTry = [
       preferredModel,
-      'gemini-flash-lite-latest',
-      'gemini-3.5-flash-lite',
       'gemini-3.5-flash',
-      'gemini-3.1-flash-lite',
-      'gemini-3-flash-preview',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-lite-latest',
+      'gemini-2.5-flash',
     ].filter((value, index, self) => self.indexOf(value) === index);
 
 
@@ -69,7 +68,7 @@ export class GeminiDirectProvider implements ILLMProvider {
         contents,
         generationConfig: {
           temperature: options?.temperature ?? 0.7,
-          maxOutputTokens: options?.maxTokens ?? 1000,
+          maxOutputTokens: options?.maxTokens ?? 4096,
         },
       };
 

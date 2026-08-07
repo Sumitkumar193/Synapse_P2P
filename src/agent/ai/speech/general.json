@@ -1,0 +1,14 @@
+[
+  { "canonical": "MCP", "aliases": [], "fullForm": "Model Context Protocol" },
+  { "canonical": "Promise", "aliases": ["the promise", "promises", "js promise"] },
+  { "canonical": "Event Loop", "aliases": ["event loop"] },
+  { "canonical": "Closure", "aliases": ["closures"] },
+  { "canonical": "Async/Await", "aliases": ["async await"] },
+  { "canonical": "Callback", "aliases": ["callbacks", "callback hell"] },
+  { "canonical": "Mutex", "aliases": ["mutual exclusion"] },
+  { "canonical": "Semaphore", "aliases": ["semaphores"] },
+  { "canonical": "Garbage Collection", "aliases": ["GC"] },
+  { "canonical": "LRU Cache", "aliases": ["LRU"] },
+  { "canonical": "System Design", "aliases": [] },
+  { "canonical": "Zod", "aliases": [] }
+]

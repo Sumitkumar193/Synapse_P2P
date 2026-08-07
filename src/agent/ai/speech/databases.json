@@ -1,0 +1,21 @@
+[
+  { "canonical": "Redis", "aliases": ["radish", "red is"] },
+  { "canonical": "PostgreSQL", "aliases": ["post grass", "post gress", "postgres"] },
+  { "canonical": "pgvector", "aliases": ["PG vector"], "fullForm": "PostgreSQL vector extension" },
+  { "canonical": "MongoDB", "aliases": ["mongo"] },
+  { "canonical": "GraphQL", "aliases": ["graph QL"] },
+  { "canonical": "SQLAlchemy", "aliases": ["SQL alchemy"] },
+  { "canonical": "ChromaDB", "aliases": ["chroma DB"] },
+  { "canonical": "FAISS", "aliases": ["face"] },
+  { "canonical": "Weaviate", "aliases": ["we V8"] },
+  { "canonical": "Qdrant", "aliases": ["Q drant"] },
+  { "canonical": "Milvus", "aliases": [] },
+  { "canonical": "Pinecone", "aliases": ["Pinecone DB", "pine cone", "pine cone DB"] },
+  { "canonical": "Supabase", "aliases": ["super base"] },
+  { "canonical": "Neon", "aliases": [] },
+  { "canonical": "SQL", "aliases": [] },
+  { "canonical": "Prisma", "aliases": ["prisma ORM"] },
+  { "canonical": "Drizzle ORM", "aliases": ["drizzle"] },
+  { "canonical": "TypeORM", "aliases": ["type ORM"] },
+  { "canonical": "Mongoose", "aliases": [] }
+]

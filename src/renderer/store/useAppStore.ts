@@ -113,8 +113,12 @@ export interface AppState {
   isAiHelperActive: boolean;
   selectedMicId: string;
   selectedSpeakerId: string;
+  enableMicListening: boolean;
+  isResumeManagerOpen: boolean;
 
   // Actions
+  setEnableMicListening: (enable: boolean) => void;
+  setIsResumeManagerOpen: (open: boolean) => void;
   setEnableHosting: (enableHosting: boolean) => void;
   setIsAiHelperActive: (isAiHelperActive: boolean) => void;
   setActiveTab: (tab: 'share' | 'join') => void;
@@ -185,7 +189,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   isAiHelperActive: false,
   selectedMicId: typeof window !== 'undefined' ? localStorage.getItem('app_selected_mic') || '' : '',
   selectedSpeakerId: typeof window !== 'undefined' ? localStorage.getItem('app_selected_speaker') || 'default' : 'default',
+  enableMicListening: typeof window !== 'undefined' ? localStorage.getItem('app_enable_mic_listening') === 'true' : false,
+  isResumeManagerOpen: false,
 
+  setEnableMicListening: (enableMicListening) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('app_enable_mic_listening', String(enableMicListening));
+    }
+    set({ enableMicListening });
+  },
+  setIsResumeManagerOpen: (isResumeManagerOpen) => set({ isResumeManagerOpen }),
   setEnableHosting: (enableHosting) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('app_enable_hosting', String(enableHosting));
